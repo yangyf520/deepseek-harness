@@ -161,6 +161,13 @@ describe('loadProfile', () => {
       .toEqual([...PROFILE_TEMPLATES.web ?? []])
   })
 
+  it('auto-initializes lark-gateway with an empty bundle list', () => {
+    const anchor = stageInstallation({})
+    const home = tmp()
+    loadProfile('t', 'lark-gateway', anchor, home)
+    expect(readProfileManifest('t', resolveProfileDir('lark-gateway', home)).dsh?.profile?.bundles).toEqual([])
+  })
+
   it('normalizes only the exact installation-owned headless bundle tuple', () => {
     const anchor = stageInstallation({
       '@deepseek-ai/dsh-base': { patch: '[]\n' },
