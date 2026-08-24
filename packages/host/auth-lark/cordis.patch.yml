@@ -13,14 +13,22 @@
         dshHome: !!js process.getBuiltinModule('node:path').join(process.env.DSH_HOME ?? process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh'), '.lark-gateway')
         watch: false
 
+    - id: auth-gateway
+      name: '@deepseek-ai/dsh-host-auth-gateway'
+      inject:
+        - webServer
+        - credentials
+      config:
+        cookieSecretEnv: LARK_AUTH_COOKIE_SECRET
+        homeRoot: !!js process.env.LARK_HOME_ROOT ?? process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh-lark-users')
+
     - id: auth-lark
       name: '@deepseek-ai/dsh-host-auth-lark'
       inject:
         - webServer
         - credentials
+        - auth
       config:
         appId: !!js process.env.LARK_APP_ID ?? 'cli_aa9ea80fecb8dcd2'
         appSecretEnv: LARK_APP_SECRET
-        cookieSecretEnv: LARK_AUTH_COOKIE_SECRET
         redirectUri: http://127.0.0.1:3080/auth/lark/callback
-        homeRoot: !!js process.env.LARK_HOME_ROOT ?? process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh-lark-users')

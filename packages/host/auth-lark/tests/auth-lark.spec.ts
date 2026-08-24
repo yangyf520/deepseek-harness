@@ -1,5 +1,5 @@
 /**
- * Gateway isolation and OAuth failure paths.
+ * Gateway isolation and OAuth failure paths (auth-gateway + auth-lark).
  */
 
 import { connect } from 'node:net'
@@ -14,8 +14,10 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import HttpServer from '@deepseek-ai/dsh-host-webserver'
 import LocalCredentials from '@deepseek-ai/dsh-credentials-local'
+import * as AuthGateway from '@deepseek-ai/dsh-host-auth-gateway'
 import * as AuthLark from '../src/index.ts'
 import { apply as applyInvariant } from '../src/invariant.ts'
+import { apply as applyGatewayInvariant } from '../../auth-gateway/src/invariant.ts'
 
 const LARK_TOKEN = 'https://open.feishu.cn/open-apis/authen/v2/oauth/token'
 const LARK_USER_INFO = 'https://open.feishu.cn/open-apis/authen/v1/user_info'
@@ -27,13 +29,14 @@ const FAKE_WORKER = `
 import { createServer } from 'node:http'
 import { mkdirSync } from 'node:fs'
 const home = process.env.DSH_HOME
+const workspace = process.env.DSH_CWD ?? ''
 const subject = process.env.DSH_AUTH_SUBJECT ?? ''
 const port = Number(process.env.DSH_WORKER_PORT)
 if (!home || !Number.isInteger(port) || port <= 0) process.exit(2)
 mkdirSync(home, { recursive: true })
 const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/plain' })
-  res.end('subject=' + subject + ' path=' + (req.url ?? ''))
+  res.end('subject=' + subject + ' workspace=' + workspace + ' path=' + (req.url ?? ''))
 })
 server.on('upgrade', (_req, socket) => {
   socket.write('HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\n')
@@ -61,7 +64,7 @@ afterEach(async () => {
 })
 
 describe('gateway', () => {
-  it('registers the invariant companion', async () => {
+  it('registers invariant companions', async () => {
     const ctx = new Context()
     const registered: string[] = []
     ctx.invariants = {
@@ -72,7 +75,11 @@ describe('gateway', () => {
       },
     } as never
     await applyInvariant(ctx)
-    expect(registered).toEqual(['@deepseek-ai/dsh-host-auth-lark'])
+    await applyGatewayInvariant(ctx)
+    expect(registered).toEqual([
+      '@deepseek-ai/dsh-host-auth-lark',
+      '@deepseek-ai/dsh-host-auth-gateway',
+    ])
   })
 
   it('rejects Host profiles that already expose ctx.agents', async () => {
@@ -84,11 +91,8 @@ describe('gateway', () => {
       resolve: async () => ({ value: 'secret' }),
     } as never
     ctx.agents = { list: () => [] } as never
-    await expect(AuthLark.apply(ctx, {
-      appId: 'cli_test',
-      appSecretEnv: 'LARK_APP_SECRET',
+    await expect(AuthGateway.apply(ctx, {
       cookieSecretEnv: 'LARK_AUTH_COOKIE_SECRET',
-      redirectUri: 'http://127.0.0.1:3080/auth/lark/callback',
       homeRoot: '/tmp/users',
       workerReadyTimeoutMs: 30_000,
     })).rejects.toThrow(/lark-gateway/)
@@ -119,6 +123,10 @@ describe('gateway', () => {
     })
     expect(a.body).toContain('subject=yangyufeng')
     expect(b.body).toContain('subject=bob')
+    expect(a.body).toContain('/lark/yangyufeng/projects')
+    expect(b.body).toContain('/lark/bob/projects')
+    expect(a.body).not.toContain('/lark/bob/')
+    expect(b.body).not.toContain('/lark/yangyufeng/')
     const again = await loginAs(gw.webServer.port, 'ou_bbb222', { name: 'Bob', enName: 'bob' })
     expect(again.body).toContain('subject=bob')
   })
@@ -315,7 +323,7 @@ function stubLark(
 }
 
 function cookieValue(setCookie: string[], name: string): string {
-  const line = setCookie.find((entry) => entry.startsWith(`${name}=`))
+  const line = setCookie.find(entry => entry.startsWith(`${name}=`))
   if (line === undefined) throw new Error(`missing ${name}`)
   return line.slice(name.length + 1).split(';')[0] ?? ''
 }
@@ -344,16 +352,18 @@ async function loadGateway(options?: {
     '  config:',
     `    dshHome: ${JSON.stringify(join(root, 'cred-home'))}`,
     '    watch: false',
+    '- name: \'@deepseek-ai/dsh-host-auth-gateway\'',
+    '  config:',
+    '    cookieSecretEnv: LARK_AUTH_COOKIE_SECRET',
+    `    homeRoot: ${JSON.stringify(resolvedHome)}`,
+    `    workerReadyTimeoutMs: ${String(ready)}`,
+    '    workerCommand:',
+    ...worker.map(part => `      - ${JSON.stringify(part)}`),
     '- name: \'@deepseek-ai/dsh-host-auth-lark\'',
     '  config:',
     '    appId: cli_test',
     '    appSecretEnv: LARK_APP_SECRET',
-    '    cookieSecretEnv: LARK_AUTH_COOKIE_SECRET',
     `    redirectUri: ${JSON.stringify(options?.redirectUri ?? 'http://127.0.0.1:3080/auth/lark/callback')}`,
-    `    homeRoot: ${JSON.stringify(resolvedHome)}`,
-    `    workerReadyTimeoutMs: ${String(ready)}`,
-    '    workerCommand:',
-    ...worker.map((part) => `      - ${JSON.stringify(part)}`),
     '',
   ].join('\n'))
   await mkdir(join(root, 'cred-home'), { recursive: true })
@@ -365,6 +375,7 @@ async function loadGateway(options?: {
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-host-webserver', HttpServer],
     ['@deepseek-ai/dsh-credentials-local', LocalCredentials],
+    ['@deepseek-ai/dsh-host-auth-gateway', AuthGateway],
     ['@deepseek-ai/dsh-host-auth-lark', AuthLark],
   ])
   context.loader.internal = {

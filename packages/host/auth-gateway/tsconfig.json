@@ -24,9 +24,6 @@
       "path": "../../credentials/credentials"
     },
     {
-      "path": "../auth-gateway"
-    },
-    {
       "path": "../webserver"
     },
     {

@@ -213,6 +213,10 @@
     - id: ui-brand-official
       name: '@deepseek-ai/dsh-client-ui-brand-official'
 
+    # Gateway session chip (avatar / logout); renders nothing without /auth/me.
+    - id: ui-auth
+      name: '@deepseek-ai/dsh-client-ui-auth'
+
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'
 

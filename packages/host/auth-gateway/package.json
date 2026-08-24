@@ -1,6 +1,6 @@
 {
-  "name": "@deepseek-ai/dsh-host-auth-lark",
-  "description": "Feishu / Lark OAuth login provider for the multi-user auth gateway",
+  "name": "@deepseek-ai/dsh-host-auth-gateway",
+  "description": "Multi-user auth gateway: cookie session, per-user home, worker spawn, and reverse-proxy",
   "version": "0.1.0-rc.8",
   "publishConfig": {
     "access": "public"
@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
-    "directory": "packages/host/auth-lark"
+    "directory": "packages/host/auth-gateway"
   },
   "type": "module",
   "main": "lib/index.js",
@@ -18,7 +18,6 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./cordis.patch.yml": "./cordis.patch.yml",
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
@@ -29,19 +28,13 @@
   "files": [
     "lib/index.js",
     "lib/invariant.js",
-    "cordis.patch.yml",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
-  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-brand": "workspace:^",
     "@deepseek-ai/dsh-credentials": "workspace:^",
-    "@deepseek-ai/dsh-host-auth-gateway": "workspace:^",
     "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   },
@@ -53,9 +46,9 @@
     "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/dsh": "workspace:^",
+    "@deepseek-ai/dsh-brand": "workspace:^",
     "@deepseek-ai/dsh-credentials": "workspace:^",
     "@deepseek-ai/dsh-credentials-local": "workspace:^",
-    "@deepseek-ai/dsh-host-auth-gateway": "workspace:^",
     "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   }
