@@ -55,6 +55,18 @@ export interface WebUpgradeRoute {
   handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
 }
 
+/**
+ * Pre-route HTTP gate. Return `true` to continue the gate chain and route
+ * dispatch; return `false` when the response lifecycle is already owned.
+ */
+export type WebHttpGate = (req: IncomingMessage, res: ServerResponse) => boolean | Promise<boolean>
+
+/**
+ * Pre-route upgrade gate. Return `true` to continue; return `false` when the
+ * socket lifecycle is already owned (typically destroyed).
+ */
+export type WebUpgradeGate = (req: IncomingMessage, socket: Duplex) => boolean | Promise<boolean>
+
 /** Gateway config: the listen address. */
 export interface Config {
   /** Listen host; the two supported values are loopback and all-interfaces. */
@@ -80,6 +92,8 @@ export class WebServer extends Service {
   private readonly prefixes = new Map<string, WebRoute>()
   private readonly upgrades = new Map<string, WebUpgradeRoute>()
   private readonly upgradedSockets = new Set<Duplex>()
+  private readonly httpGates: WebHttpGate[] = []
+  private readonly upgradeGates: WebUpgradeGate[] = []
   private readonly indexTaps: ((html: string) => string)[] = []
   private fallback: WebRoute['handler'] | undefined
   private server!: Server
@@ -129,6 +143,33 @@ export class WebServer extends Service {
   }
 
   /**
+   * Register a pre-route HTTP gate evaluated before named routes and fallback.
+   * Gates run in registration order; the first `false` result stops dispatch.
+   * @param gate - returns whether dispatch should continue.
+   * @returns the disposer removing the gate.
+   */
+  registerHttpGate(gate: WebHttpGate): () => void {
+    this.httpGates.push(gate)
+    return () => {
+      const at = this.httpGates.indexOf(gate)
+      if (at !== -1) this.httpGates.splice(at, 1)
+    }
+  }
+
+  /**
+   * Register a pre-route upgrade gate evaluated before named upgrade routes.
+   * @param gate - returns whether upgrade dispatch should continue.
+   * @returns the disposer removing the gate.
+   */
+  registerUpgradeGate(gate: WebUpgradeGate): () => void {
+    this.upgradeGates.push(gate)
+    return () => {
+      const at = this.upgradeGates.indexOf(gate)
+      if (at !== -1) this.upgradeGates.splice(at, 1)
+    }
+  }
+
+  /**
    * Claim the fallback seat: the handler answering every request no named
    * route matches (the SPA dist server in the shipped Web composition). One
    * owner only — a second registration throws, because two fallbacks cannot
@@ -162,6 +203,9 @@ export class WebServer extends Service {
   /** Listen; resolves once the socket is bound (rejection = FAILED fiber). */
   async [Service.init](): Promise<void> {
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      for (const gate of this.httpGates) {
+        if (!(await gate(req, res))) return
+      }
       /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server
       requests; the field is only optional on the client-side IncomingMessage type */
       const rawPath = new URL(req.url ?? '/', 'http://x').pathname
@@ -203,29 +247,37 @@ export class WebServer extends Service {
         socket.off('error', onError)
         this.upgradedSockets.delete(socket)
       })
-      let route: WebUpgradeRoute | undefined
-      try {
-        /* v8 ignore next -- node:http always sets url on server requests. */
-        route = this.upgrades.get(new URL(req.url ?? '/', 'http://x').pathname)
-      } catch (error) {
-        this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
-        socket.destroy()
-        return
-      }
-      if (route === undefined) {
-        socket.destroy()
-        return
-      }
-      this.upgradedSockets.add(socket)
-      try {
-        Promise.resolve(route.handler(req, socket, head)).catch((error: unknown) => {
+      void (async () => {
+        for (const gate of this.upgradeGates) {
+          if (!(await gate(req, socket))) return
+        }
+        let route: WebUpgradeRoute | undefined
+        try {
+          /* v8 ignore next -- node:http always sets url on server requests. */
+          route = this.upgrades.get(new URL(req.url ?? '/', 'http://x').pathname)
+        } catch (error) {
           this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
           socket.destroy()
-        })
-      } catch (error) {
+          return
+        }
+        if (route === undefined) {
+          socket.destroy()
+          return
+        }
+        this.upgradedSockets.add(socket)
+        try {
+          Promise.resolve(route.handler(req, socket, head)).catch((error: unknown) => {
+            this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+            socket.destroy()
+          })
+        } catch (error) {
+          this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+          socket.destroy()
+        }
+      })().catch((error: unknown) => {
         this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
         socket.destroy()
-      }
+      })
     })
 
     await new Promise<void>((resolve, reject) => {

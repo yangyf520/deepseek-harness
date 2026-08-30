@@ -1,0 +1,23 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "jsx": "react-jsx",
+    "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo",
+    "typeRoots": ["../../../scripts/types", "../../../node_modules/@types", "../../client/node_modules/@types"],
+    "types": ["node", "client-build-environment"]
+  },
+  "include": ["src/client", "src/css-modules.d.ts"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../api/remotes/tsconfig.client.json" },
+    { "path": "../../client/connection/tsconfig.client.json" },
+    { "path": "../../client/runtime" },
+    { "path": "../../client/ui-settings" },
+    { "path": "../../client/ui-sidebar" },
+    { "path": "../../client/ui-primitives" },
+    { "path": "../../client/ui-slots" },
+    { "path": "../../client/locale" }
+  ]
+}

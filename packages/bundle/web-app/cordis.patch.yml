@@ -125,6 +125,10 @@
         host: !!js ctx.webStartup.host ?? '127.0.0.1'
         port: !!js ctx.webStartup.port ?? 3080
 
+    - id: auth-gate
+      name: '@deepseek-ai/dsh-host-auth-gate'
+
+
     # Web glue owned by this bundle: resolves the built frontend dist (an
     # assembly fact of dsh-web-app, never user config), mounts the
     # frontend-static fallback owner, registers the web-surface prompt
