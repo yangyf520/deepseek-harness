@@ -12,7 +12,7 @@ Web Host 的 OAuth2 登录网关：管理员在设置 UI 配置第三方登录�
 | **终端用户** | 浏览器登录、查看当前账号、退出登录 |
 | **Host 插件** | 注册 `/auth*` 路由、签发 `auth-sid` cookie、在 HTTP/WebSocket 层拦截匿名流量 |
 
-本包**不**做按用户的数据隔离；需要 session 级隔离时与 `auth-tenant` 一起挂载。
+本包**不**做按用户的数据隔离；需要 session 级隔离时与 [`auth-tenant`](../auth-tenant/README.zh.md) 一起挂载。
 
 ## 快速开始
 
@@ -125,7 +125,7 @@ sequenceDiagram
 
 ## 与 auth-tenant 配合
 
-同时挂载 `auth-tenant` 时，OAuth 回调成功后会调用 `authTenant.bindAuthPrincipal`，把解析出的 `tenantId` 写入 session 用户资料。详见该包 README 中的租户隔离说明。
+同时挂载 [`auth-tenant`](../auth-tenant/README.zh.md) 时，OAuth 回调成功后会调用 `authTenant.bindAuthPrincipal`，把解析出的 `tenantId` 写入 session 用户资料。详见该包 README 中的租户隔离说明。
 
 ## 模型体验
 

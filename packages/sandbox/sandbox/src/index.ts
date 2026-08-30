@@ -18,7 +18,7 @@ export {
   validateEscalationArgs,
 } from './escalation.ts'
 export type { EscalationApproval, EscalationApprover, EscalationOutcome, EscalationRequest } from './escalation.ts'
-export { canonicalPath, writableRoots } from './roots.ts'
+export { canonicalPath, tenantBwrapArgs, tenantSeatbeltForms, writableRoots } from './roots.ts'
 
 /**
  * File-effect policy for confined processes. `read-only` permits only required
@@ -30,6 +30,18 @@ export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 
 /** A confining (non-`danger-full-access`) mode — the modes a {@link SandboxPolicy} can carry. */
 export type ConfinedSandboxMode = Exclude<SandboxMode, 'danger-full-access'>
+
+/**
+ * Per-tenant containment under `$DSH_HOME/users/`. When present, every
+ * enforcing consumer must reject access to sibling tenant trees while leaving
+ * paths outside `usersRoot` unchanged.
+ */
+export interface TenantIsolation {
+  /** Absolute `$DSH_HOME/users/` root. */
+  usersRoot: string
+  /** Absolute `$DSH_HOME/users/<tenant>/` root for the active principal. */
+  tenantRoot: string
+}
 
 /**
  * The complete file-effect policy resolved for one capability call. The root
@@ -49,6 +61,8 @@ export interface SandboxExecutionPolicy {
    * for agentless calls, which fall back to per-call backend state.
    */
   sessionId?: SessionId
+  /** Optional multi-user tenant fence; independent of {@link SandboxMode}. */
+  tenantIsolation?: TenantIsolation
 }
 
 /**

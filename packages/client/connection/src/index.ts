@@ -1,4 +1,5 @@
 /** Host HTTP bridge for browser-client RPC. */
+import type { IncomingMessage } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
@@ -22,6 +23,30 @@ export type {
 export { HostConnectionService } from './rpc-host.ts'
 
 export { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
+
+/**
+ * Optional wrapper around each `/api` bridge dispatch (for example auth-tenant
+ * principal AsyncLocalStorage). Registered scopes run outside-in before the
+ * shared fetch handler.
+ */
+export type ApiBridgeScope = (
+  req: IncomingMessage,
+  dispatch: () => Promise<void>,
+) => Promise<void>
+
+const apiBridgeScope: { current?: ApiBridgeScope | undefined } = {}
+
+/** Register the `/api` bridge scope (at most one consumer, e.g. auth-tenant ALS). */
+export function registerApiBridgeScope(scope: ApiBridgeScope): () => void {
+  apiBridgeScope.current = scope
+  return () => { apiBridgeScope.current = undefined }
+}
+
+async function runApiBridgeScoped(req: IncomingMessage, dispatch: () => Promise<void>): Promise<void> {
+  const scope = apiBridgeScope.current
+  if (scope === undefined) await dispatch()
+  else await scope(req, dispatch)
+}
 
 /** Stable Cordis plugin name. */
 export const name = 'client-connection'
@@ -167,7 +192,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         res.end('forbidden')
         return
       }
-      await bridge(req, res, fetchHandler, maxRequestBodyBytes)
+      await runApiBridgeScoped(req, () => bridge(req, res, fetchHandler, maxRequestBodyBytes))
     },
   }
   ctx.effect(() => ctx.webServer.register(route), 'client-connection: /api route')

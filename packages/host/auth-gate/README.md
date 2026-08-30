@@ -12,7 +12,7 @@ OAuth2 login gateway for the web host: administrators configure third-party logi
 | **End user** | Browser login, current-account panel, logout |
 | **Host plugin** | Registers `/auth*` routes, issues the `auth-sid` cookie, gates HTTP and WebSocket traffic |
 
-This package does **not** isolate per-user data. Mount `auth-tenant` alongside it when session-level isolation is required.
+This package does **not** isolate per-user data. Mount [`auth-tenant`](../auth-tenant/README.md) alongside it when session-level isolation is required.
 
 ## Quick start
 
@@ -125,7 +125,7 @@ Changes apply **live** without restarting the process.
 
 ## Working with auth-tenant
 
-When `auth-tenant` is also composed, a successful OAuth callback calls `authTenant.bindAuthPrincipal` and records the resolved `tenantId` on the session user. See that package README for tenant isolation details.
+When [`auth-tenant`](../auth-tenant/README.md) is also composed, a successful OAuth callback calls `authTenant.bindAuthPrincipal` and records the resolved `tenantId` on the session user. See that package README for tenant isolation details.
 
 ## Model Experience
 

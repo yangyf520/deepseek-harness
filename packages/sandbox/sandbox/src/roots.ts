@@ -15,7 +15,7 @@
 
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import type { SandboxExecutionPolicy } from './index.ts'
+import type { SandboxExecutionPolicy, TenantIsolation } from './index.ts'
 
 /**
  * Resolve a granted root to the path the enforcement layer actually compares:
@@ -52,4 +52,26 @@ export function canonicalPath(path: string): string {
 export function writableRoots(policy: SandboxExecutionPolicy): string[] {
   if (policy.mode !== 'workspace-write') return []
   return [...new Set([policy.workspaceRoot, '/tmp', tmpdir()].map(canonicalPath))]
+}
+
+/**
+ * bwrap mount arguments that hide sibling tenants under `usersRoot` while
+ * exposing only `tenantRoot`.
+ * @param isolation - active tenant containment roots.
+ * @returns profile arguments to append before the command separator.
+ */
+export function tenantBwrapArgs(isolation: TenantIsolation): string[] {
+  return ['--tmpfs', isolation.usersRoot, '--ro-bind', isolation.tenantRoot, isolation.tenantRoot]
+}
+
+/**
+ * SBPL forms that deny reads under `usersRoot` except within `tenantRoot`.
+ * @param isolation - active tenant containment roots.
+ * @returns SBPL forms to append after the writable-root grants.
+ */
+export function tenantSeatbeltForms(isolation: TenantIsolation, quote: (path: string) => string): string[] {
+  return [
+    `(deny file-read* (subpath ${quote(isolation.usersRoot)}))`,
+    `(allow file-read* (subpath ${quote(isolation.tenantRoot)}))`,
+  ]
 }

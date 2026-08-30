@@ -98,6 +98,7 @@ export interface CreateAgentOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    readonly tenantId?: string
   }
   /**
    * Initial replay/fork history. A fork supplies a balanced completed-turn

@@ -234,3 +234,41 @@ describe('FsError identity', () => {
     expect((error as FsError).code).toBe('FS_SANDBOX_DENIED')
   })
 })
+
+describe('tenant isolation', () => {
+  let users: string
+  let alice: string
+  let bob: string
+
+  beforeEach(async () => {
+    users = join(base, 'users')
+    alice = join(users, 'alice')
+    bob = join(users, 'bob')
+    await mkdir(alice, { recursive: true })
+    await mkdir(bob, { recursive: true })
+    await writeFile(join(alice, 'mine.txt'), 'alice')
+    await writeFile(join(bob, 'theirs.txt'), 'bob')
+    ctx = new Context()
+    await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: alice })
+    ctx.sandboxPolicy.resolve = () => ({
+      mode: 'danger-full-access' as const,
+      workspaceRoot: alice,
+      tenantIsolation: { usersRoot: users, tenantRoot: alice },
+    })
+    fiber = await ctx.plugin(SandboxedFileSystem, { cwd: alice })
+    fs = ctx.fs as SandboxedFileSystem
+  })
+
+  it('denies reads and writes under another tenant even in danger-full-access', async () => {
+    const bobFile = await fs.resolve(join(bob, 'theirs.txt'))
+    await expect(fs.readText(bobFile)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(fs.writeText(
+      bobFile,
+      'pwned',
+      undefined,
+      undefined,
+      { mode: 'danger-full-access', workspaceRoot: alice, tenantIsolation: { usersRoot: users, tenantRoot: alice } },
+    )).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(await fs.readText(await fs.resolve(join(alice, 'mine.txt')))).toBe('alice')
+  })
+})

@@ -303,6 +303,7 @@
     { "path": "./packages/host/plugin-inventory" },
     { "path": "./packages/host/webserver" },
     { "path": "./packages/host/auth-gate/tsconfig.host.json" },
+    { "path": "./packages/host/auth-tenant" },
     { "path": "./packages/sdk/client" },
     { "path": "./packages/sdk/protocol" },
     { "path": "./packages/lsp/lsp" },

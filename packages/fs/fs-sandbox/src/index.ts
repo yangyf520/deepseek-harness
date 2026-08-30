@@ -3,9 +3,8 @@
  * `@deepseek-ai/dsh-fs` Service Definition. It extends `LocalFileSystem` so all
  * text-storage mechanics — resolve, stat, read/stream, list, the atomic
  * write and the read-match-write edit critical section — are the local
- * implementation's, verbatim; this package adds only the per-call POLICY fence
- * on the two mutations. Reads pass through untouched: every mode permits
- * reading.
+ * implementation's, verbatim; this package adds per-call POLICY fences on reads
+ * (when {@link SandboxExecutionPolicy.tenantIsolation} is set) and on mutations.
  *
  * The fence is a policy check in TRUSTED code over a MODEL-CONTROLLED path,
  * NOT a kernel boundary — the operations are the seam's own (open, rename),
@@ -21,11 +20,13 @@
  * a mutation only when the target canonicalizes under the policy's workspace
  * root or a platform temp area (the SAME writable-root set Seatbelt grants,
  * derived from the one `writableRoots` function so bash and fs cannot drift);
- * `danger-full-access` delegates unfenced. A denial throws the structured
- * `FS_SANDBOX_DENIED` — no text inference is needed (unlike bash's kernel
- * stderr), because an in-process fence knows exactly what it refused. The
- * escalation retry lives in the tool layer (`@deepseek-ai/dsh-tool-fs`),
- * exactly as bash's does.
+ * `danger-full-access` delegates unfenced to mode checks. When
+ * {@link SandboxExecutionPolicy.tenantIsolation} is set, every read and write
+ * under `usersRoot` must stay within `tenantRoot`, including under
+ * `danger-full-access`. A denial throws the structured `FS_SANDBOX_DENIED` — no
+ * text inference is needed (unlike bash's kernel stderr), because an in-process
+ * fence knows exactly what it refused. The escalation retry lives in the tool
+ * layer (`@deepseek-ai/dsh-tool-fs`), exactly as bash's does.
  *
  * @module @deepseek-ai/dsh-fs-sandbox
  */
@@ -34,11 +35,13 @@ import { Context } from '@deepseek-ai/cordis'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import type { Config as LocalConfig } from '@deepseek-ai/dsh-fs-local'
 import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsEditOutcome, FsEditRequest, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
+import type { FsDirEntry, FsEditOutcome, FsEditRequest, FsInfo, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import { isPathUnder } from './containment.ts'
+import { assertTenantPath, isPathUnder } from './containment.ts'
+
+export { assertTenantPath, isLexicallyUnder, isPathUnder } from './containment.ts'
 
 /**
  * Plugin config: the local backend's knobs verbatim (`cwd` resolution default
@@ -68,6 +71,35 @@ export class SandboxedFileSystem extends LocalFileSystem {
   /** The deployment default mode — the capability fact the tool layer reads to advertise escalation. */
   override get sandboxMode(): SandboxMode {
     return this.defaultMode
+  }
+
+  override async stat(target: FsTarget, signal?: AbortSignal): Promise<FsInfo | undefined> {
+    await this.assertTenantAllowed(target)
+    return super.stat(target, signal)
+  }
+
+  override async readText(target: FsTarget, signal?: AbortSignal): Promise<string> {
+    await this.assertTenantAllowed(target)
+    return super.readText(target, signal)
+  }
+
+  override async readBytes(
+    target: FsTarget,
+    signal: AbortSignal | undefined,
+    maxBytes: number,
+  ): Promise<Uint8Array> {
+    await this.assertTenantAllowed(target)
+    return super.readBytes(target, signal, maxBytes)
+  }
+
+  override async listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]> {
+    await this.assertTenantAllowed(target)
+    return super.listDir(target, signal)
+  }
+
+  override async streamText(target: FsTarget, signal?: AbortSignal): Promise<AsyncIterable<string>> {
+    await this.assertTenantAllowed(target)
+    return super.streamText(target, signal)
   }
 
   /**
@@ -112,6 +144,12 @@ export class SandboxedFileSystem extends LocalFileSystem {
     return super.editText(await this.checkedTarget(target, sandboxPolicy), edit, expected, signal)
   }
 
+  private async assertTenantAllowed(target: FsTarget): Promise<void> {
+    const isolation = this.ctx.sandboxPolicy.resolve().tenantIsolation
+    if (isolation === undefined) return
+    await assertTenantPath(target.targetKey, target.displayPath, isolation)
+  }
+
   /**
    * Enforce the per-call policy against `target` and return the EXACT target the
    * mutation must use, so the checked identity is the mutated one (no
@@ -119,12 +157,14 @@ export class SandboxedFileSystem extends LocalFileSystem {
    * re-canonicalizes NOW (`resolve` realpaths the deepest existing ancestor,
    * reflecting a concurrently swapped symlink), requires containment under a
    * writable root, and returns THAT fresh target; `danger-full-access` returns
-   * the caller's target unfenced. Throws the structured `FS_SANDBOX_DENIED` on
-   * refusal — the tool layer maps it to the model-facing `[sandbox: …]` marker
-   * and the escalation hint.
+   * the caller's target unfenced to mode checks. Tenant isolation applies
+   * before mode. Throws the structured `FS_SANDBOX_DENIED` on refusal — the
+   * tool layer maps it to the model-facing `[sandbox: …]` marker and the
+   * escalation hint.
    */
   private async checkedTarget(target: FsTarget, sandboxPolicy?: SandboxExecutionPolicy): Promise<FsTarget> {
     const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
+    await this.assertTenantAllowed(target)
     const { mode } = policy
     if (mode === 'danger-full-access') return target
     if (mode === 'read-only') {

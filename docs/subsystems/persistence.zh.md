@@ -86,6 +86,11 @@ interface SessionHeader {
    * would replay history the model can no longer act on.
    */
   readonly agentPreset?: string
+  /**
+   * Web 认证租户 id，在创建 session 时写入；用于跨重启过滤 Sessions API。
+   * 未经租户认证创建的 session 没有该字段。
+   */
+  readonly tenantId?: string
 }
 ```
 
@@ -118,6 +123,7 @@ interface CreateSessionOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    readonly tenantId?: string
   }
 }
 ```

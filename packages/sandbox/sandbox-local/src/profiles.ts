@@ -5,7 +5,7 @@
  */
 
 import { grantArgs as landlockGrantArgs } from '@deepseek-ai/node-addon-landlock-run'
-import { writableRoots } from '@deepseek-ai/dsh-sandbox'
+import { tenantBwrapArgs, tenantSeatbeltForms, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 
 /**
@@ -18,6 +18,9 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
   if (policy.mode === 'workspace-write') {
     args.push('--tmpfs', '/tmp')
     args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
+  }
+  if (policy.tenantIsolation !== undefined) {
+    args.push(...tenantBwrapArgs(policy.tenantIsolation))
   }
   return args
 }
@@ -53,6 +56,9 @@ export function seatbeltProfileArgs(policy: SandboxPolicy): string[] {
   const roots = writableRoots(policy)
   if (roots.length > 0) {
     forms.push(`(allow file-write* ${roots.map(root => `(subpath ${sbplString(root)})`).join(' ')})`)
+  }
+  if (policy.tenantIsolation !== undefined) {
+    forms.push(...tenantSeatbeltForms(policy.tenantIsolation, sbplString))
   }
   return ['-p', forms.join(' ')]
 }

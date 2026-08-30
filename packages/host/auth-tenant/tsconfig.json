@@ -1,0 +1,26 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../core/session" },
+    { "path": "../../core/agent" },
+    { "path": "../../credentials/credentials" },
+    { "path": "../../settings/settings" },
+    { "path": "../../util/atomic-write" },
+    { "path": "../../util/home-paths" },
+    { "path": "../../fs/fs" },
+    { "path": "../../fs/fs-sandbox" },
+    { "path": "../../sandbox/sandbox" },
+    { "path": "../../sandbox/sandbox-policy" },
+    { "path": "../../subprocess/subprocess" },
+    { "path": "../../client/connection/tsconfig.host.json" },
+    { "path": "../auth-gate/tsconfig.host.json" },
+    { "path": "../apiproxy" },
+    { "path": "../webserver" }
+  ]
+}

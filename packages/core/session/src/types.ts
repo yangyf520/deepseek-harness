@@ -96,6 +96,11 @@ export interface SessionHeader {
    * would replay history the model can no longer act on.
    */
   readonly agentPreset?: string
+  /**
+   * Tenant id stamped when a web principal creates the session; used to filter
+   * Sessions API access across restarts. Absent on sessions created without tenant auth.
+   */
+  readonly tenantId?: string
 }
 
 /**
@@ -118,6 +123,7 @@ export interface CreateSessionOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    readonly tenantId?: string
   }
 }
 

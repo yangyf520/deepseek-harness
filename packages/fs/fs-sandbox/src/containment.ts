@@ -8,6 +8,8 @@
 import type { BigIntStats } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { dirname, sep } from 'node:path'
+import { FsError } from '@deepseek-ai/dsh-fs'
+import type { TenantIsolation } from '@deepseek-ai/dsh-sandbox'
 
 const MISSING_CODES: ReadonlySet<NodeJS.ErrnoException['code']> = new Set(['ENOENT', 'ENOTDIR'])
 
@@ -20,7 +22,12 @@ function comparablePath(path: string, caseSensitive: boolean): string {
   return caseSensitive ? path : path.toLowerCase()
 }
 
-function isLexicallyUnder(path: string, root: string, caseSensitive: boolean): boolean {
+/** Lexical under-root check for synchronous callers (for example subprocess argv). */
+export function isLexicallyUnder(
+  path: string,
+  root: string,
+  caseSensitive = process.platform !== 'win32',
+): boolean {
   const comparableTarget = comparablePath(path, caseSensitive)
   const comparableRoot = comparablePath(root, caseSensitive)
   if (comparableTarget === comparableRoot) return true
@@ -72,5 +79,26 @@ export async function isPathUnder(
     const parent = dirname(ancestor)
     if (parent === ancestor) return false
     ancestor = parent
+  }
+}
+
+/**
+ * Reject access under `$DSH_HOME/users/` that crosses tenant boundaries. Paths
+ * outside `usersRoot` are unchanged so shared project directories stay reachable.
+ * @param targetKey - canonical filesystem key for the target path.
+ * @param displayPath - model-facing path for error messages.
+ * @param isolation - active tenant containment roots.
+ */
+export async function assertTenantPath(
+  targetKey: string,
+  displayPath: string,
+  isolation: TenantIsolation,
+): Promise<void> {
+  if (!(await isPathUnder(targetKey, isolation.usersRoot))) return
+  if (!(await isPathUnder(targetKey, isolation.tenantRoot))) {
+    throw new FsError(
+      `cannot access "${displayPath}": path is outside the authenticated user's tenant directory`,
+      'FS_SANDBOX_DENIED',
+    )
   }
 }
