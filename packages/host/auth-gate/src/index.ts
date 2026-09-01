@@ -9,7 +9,7 @@ import { isLoopbackHostname } from '@deepseek-ai/dsh-client-connection/src/loopb
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { registerApiBridgeScope } from '@deepseek-ai/dsh-client-connection'
 import type { RpcError, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
-import type { SettingsApi } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { SettingsApi, SettingsNamespaceView } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { WorkspaceApi } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-host-apiproxy'
@@ -610,19 +610,31 @@ function patchCloudGuards(
     })
   }
 
-  proxy.workspace.create = request => rpcErr(request.rpcId, {
+  proxy.workspace.create = async request => rpcErr(request.rpcId, {
     code: 'bad-request',
     message: 'adding workspaces is disabled in this deployment',
     details: { issues: [] },
   })
 
-  for (const method of ['mutate', 'update', 'replace'] as const) {
-    const original = proxy.settings[method].bind(proxy.settings)
-    proxy.settings[method] = async (request) => {
-      const denied = denySettings(request)
-      if (denied !== undefined) return denied
-      return original(request)
-    }
+  const originalUpdate = proxy.settings.update.bind(proxy.settings)
+  proxy.settings.update = async (request) => {
+    const denied = denySettings<SettingsNamespaceView>(request)
+    if (denied !== undefined) return denied
+    return originalUpdate(request)
+  }
+
+  const originalReplace = proxy.settings.replace.bind(proxy.settings)
+  proxy.settings.replace = async (request) => {
+    const denied = denySettings<SettingsNamespaceView>(request)
+    if (denied !== undefined) return denied
+    return originalReplace(request)
+  }
+
+  const originalMutate = proxy.settings.mutate.bind(proxy.settings)
+  proxy.settings.mutate = async (request) => {
+    const denied = denySettings<SettingsNamespaceView>(request)
+    if (denied !== undefined) return denied
+    return originalMutate(request)
   }
 }
 
