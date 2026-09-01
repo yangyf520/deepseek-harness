@@ -10,7 +10,7 @@ Web Host 的按用户租户隔离：登录用户只能列出、创建和操作�
 |------|------|
 | **Session 归属** | 每个 agent session 绑定到登录用户的 `tenantId` |
 | **Sessions API 过滤** | `list` / `search` 只返回本人 session；`create` / `history` / `prompt` 等拒绝越权 |
-| **工作目录** | 新建 session 的 `cwd` 设为 `$DSH_HOME/users/<tenant>/workspace` |
+| **工作目录** | 新建 session 的 `cwd` 设为 `$DSH_HOME/users/<tenant>/<tenant>`（目录名与选择器标题一致） |
 | **持久归属（P0）** | `SessionHeader.tenantId` 写入磁盘；重启后仍按 header 过滤 |
 | **凭据隔离（P1）** | 模型 API Key 等写入 `$DSH_HOME/users/<tenant>/.credentials.yaml`；`AUTH_*` OAuth 密钥仍全局 |
 | **设置隔离（P1）** | 非全局 namespace 的用户层写入 `$DSH_HOME/users/<tenant>/settings.yaml`；`auth-channels` 仍全局；运行时 `ctx.settings.get()` 叠加 tenant 层 |
@@ -56,7 +56,7 @@ flowchart LR
   ALS --> API
 ```
 
-1. **登录时**（`auth-gate` 回调）：`authTenant.bindAuthPrincipal` 解析 `tenantId` 并写入 `AuthUser.tenantId`。
+1. **登录时**（`auth-gate` 回调）：`authTenant.bindAuthPrincipal` 解析 `tenantId`、写入 `AuthUser.tenantId`，并在 workspace 注册表中登记 `$DSH_HOME/users/<tenant>/<tenant>`，显示标题使用小写英文名 slug（飞书 `en_name` 常为大写）。
 2. **`/api` 请求时**（`client-connection` bridge + 本包 scope）：从 cookie 取出 principal，在 `AsyncLocalStorage` 中运行整条 connection 分发链（含 privileged 方法与 Typert intercept）。
 3. **Sessions RPC 时**（本包 patch）：按 principal 的 `tenantId` 过滤或拒绝。
 
@@ -75,7 +75,8 @@ flowchart LR
 |--------|--------|
 | Sessions API：`list`、`search`、`create`、`history`、`prompt`、`fork` 等 | session 持久化仍共库 |
 | **`subagent.*`、`goal.*`、`GET /api/session.export`** | |
-| 新建 session 的 `cwd` 指向用户 workspace | **workspace.\*** 等其余 `/api` 命名空间（P1） |
+| 新建 session 的 `cwd` 指向用户 workspace | 其余 **workspace.\*** RPC（rename、delete、reorder）及 workspace host 事件 |
+| **`workspace.list`** 仅返回该租户 workspace 路径 | |
 | `SessionHeader.tenantId` 持久归属 | workspace 类 host 事件仍全局 |
 | 凭据 API + agent 运行时（租户 `.credentials.yaml`） | |
 | Settings API + 运行时 `ctx.settings.get()` tenant 叠加 | |
@@ -87,8 +88,8 @@ flowchart TB
   subgraph isolated [Isolated by this package]
     S1[User A sessions]
     S2[User B sessions]
-    W1["$DSH_HOME/users/a/workspace"]
-    W2["$DSH_HOME/users/b/workspace"]
+    W1["$DSH_HOME/users/a/a"]
+    W2["$DSH_HOME/users/b/b"]
   end
   subgraph shared [Still shared]
     FS[Global filesystem]
@@ -113,7 +114,7 @@ sequenceDiagram
   G->>T: bindAuthPrincipal
   T->>T: user.tenantId = resolve(user)
   U->>T: POST /api sessions.create
-  T->>T: mkdir users/tenant/workspace
+  T->>T: mkdir users/tenant/tenant
   T->>API: create(cwd=workspace)
   T->>T: rememberHeader(sessionId, tenantId)
   U->>T: sessions.list
@@ -133,10 +134,10 @@ sequenceDiagram
 ### 工作区路径
 
 ```text
-$DSH_HOME/users/<tenantId>/workspace
+$DSH_HOME/users/<tenantId>/<tenantId>
 ```
 
-用户首次创建 session 时递归创建。
+登录时及用户首次创建 session 时递归创建。
 
 ## 与 auth-gate 配合
 

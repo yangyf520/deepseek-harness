@@ -241,6 +241,8 @@ describe('auth-gate', () => {
       userId: 'ou_test',
       displayName: 'Tester',
       englishName: 'Tester EN',
+      cloud: false,
+      superAdmin: true,
     })
     expect(credentialRef('TEST_SECRET')).toBe('TEST_SECRET')
   })
@@ -266,6 +268,59 @@ describe('auth-gate', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/anything`)
     expect(res.status).toBe(401)
     await expect(res.json()).resolves.toEqual({ error: 'authentication required' })
+  })
+
+  it('reports local deployment on /auth/me when unauthenticated and SUPER_ADMIN_USERS is unset', async () => {
+    const { port } = await loadComposition()
+    const res = await fetch(`http://127.0.0.1:${port}/auth/me`)
+    expect(res.status).toBe(401)
+    await expect(res.json()).resolves.toEqual({ error: 'not authenticated', cloud: false })
+  })
+
+  it('flags cloud deployment and super-admin membership on /auth/me', async () => {
+    const previous = process.env.SUPER_ADMIN_USERS
+    process.env.SUPER_ADMIN_USERS = 'tester-en'
+    try {
+      const { port, ctx } = await loadComposition()
+      const authSid = ctx.authGate.createSession({
+        provider: 'feishu',
+        userId: 'ou_other',
+        englishName: 'Tester-EN',
+      })
+      const res = await fetch(`http://127.0.0.1:${port}/auth/me`, {
+        headers: { cookie: `auth-sid=${authSid}` },
+      })
+      expect(res.status).toBe(200)
+      await expect(res.json()).resolves.toMatchObject({
+        userId: 'ou_other',
+        cloud: true,
+        superAdmin: true,
+      })
+    } finally {
+      if (previous === undefined) delete process.env.SUPER_ADMIN_USERS
+      else process.env.SUPER_ADMIN_USERS = previous
+    }
+  })
+})
+
+describe('cloud deployment helpers', () => {
+  it('treats an empty allowlist as local deployment', () => {
+    expect(AuthGate.parseSuperAdminAllowlist(undefined)).toEqual([])
+    expect(AuthGate.parseSuperAdminAllowlist('  ,  ')).toEqual([])
+    expect(AuthGate.isCloudDeployment([])).toBe(false)
+    expect(AuthGate.isSuperAdmin({ userId: 'alice' }, [])).toBe(true)
+  })
+
+  it('parses comma-separated super-admin ids case-insensitively', () => {
+    expect(AuthGate.parseSuperAdminAllowlist(' Alice , Bob ')).toEqual(['alice', 'bob'])
+    expect(AuthGate.isCloudDeployment(['alice'])).toBe(true)
+  })
+
+  it('matches cloud super admins by userId or englishName', () => {
+    const allowlist = AuthGate.parseSuperAdminAllowlist('admin-user,ops-team')
+    expect(AuthGate.isSuperAdmin({ userId: 'admin-user' }, allowlist)).toBe(true)
+    expect(AuthGate.isSuperAdmin({ userId: 'other', englishName: 'Ops-Team' }, allowlist)).toBe(true)
+    expect(AuthGate.isSuperAdmin({ userId: 'guest' }, allowlist)).toBe(false)
   })
 })
 

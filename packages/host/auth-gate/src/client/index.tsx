@@ -224,6 +224,20 @@ interface AuthMe {
   displayName?: string
   englishName?: string
   avatarUrl?: string
+  cloud?: boolean
+  superAdmin?: boolean
+  error?: string
+}
+
+async function shouldRegisterAuthChannels(): Promise<boolean> {
+  try {
+    const res = await fetch('/auth/me', { credentials: 'same-origin' })
+    const body = await res.json() as AuthMe
+    if (res.ok) return body.cloud !== true || body.superAdmin === true
+    return body.cloud !== true
+  } catch {
+    return true
+  }
 }
 
 type AccountProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<'account.auth'>
@@ -307,11 +321,22 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'auth-account', order: 5, locale: ACCOUNT_NS,
   }, AccountFooter))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section', id: 'auth-channels', order: 22, label: () => t('nav'), locale: CHANNEL_NS,
-    inject: () => ({
-      scope: ctx.settingsScope.bind<Record<string, ChannelDraft>>({ namespace: 'auth-channels' }),
-      api,
-    }),
-  }, ChannelSection))
+  ctx.slots.inject('settings.section', () => {
+    let disposeRegistration: (() => void) | undefined
+    let cancelled = false
+    void shouldRegisterAuthChannels().then((register) => {
+      if (cancelled || !register) return
+      disposeRegistration = ctx.slots.register({
+        name: 'settings.section', id: 'auth-channels', order: 22, label: () => t('nav'), locale: CHANNEL_NS,
+        inject: () => ({
+          scope: ctx.settingsScope.bind<Record<string, ChannelDraft>>({ namespace: 'auth-channels' }),
+          api,
+        }),
+      }, ChannelSection)
+    })
+    return () => {
+      cancelled = true
+      disposeRegistration?.()
+    }
+  })
 }

@@ -6,9 +6,10 @@ import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
+import { currentPrincipal } from '@deepseek-ai/dsh-host-auth-gate'
 import type {
   CredentialsApi, DownloadsApi, EventsApi, GoalsApi, HostFrame, MuxFrame, RpcError, RpcId, RpcResponse,
-  SessionsApi, SettingsApi, SettingsNamespaceView, SubagentsApi,
+  SessionsApi, SettingsApi, SettingsNamespaceView, SubagentsApi, WorkspaceApi,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type {} from '@deepseek-ai/dsh-credentials'
 import { SESSION_FORMAT_VERSION, type SessionHeader, type SessionId } from '@deepseek-ai/dsh-session/types'
@@ -16,7 +17,13 @@ import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type z from '@deepseek-ai/schemastery'
-import { activeTenantId, currentTenantId } from './principal.ts'
+import {
+  activeTenantId,
+  assertTenantArgvPaths,
+  currentTenantId,
+  tenantIsolationFor,
+  withTenantIsolation,
+} from './tenant-access.ts'
 import {
   describeTenantCredential,
   GLOBAL_SETTINGS_NAMESPACES,
@@ -30,7 +37,6 @@ import {
   setTenantCredential,
   unsetTenantCredential,
 } from './tenant-files.ts'
-import { assertTenantArgvPaths, tenantIsolationFor, withTenantIsolation } from './tenant-access.ts'
 
 function rpcOk<T>(rpcId: RpcId, value: T): RpcResponse<T> {
   return { rpcId, result: { ok: true, value } }
@@ -52,6 +58,10 @@ export interface SessionGuardHost {
   ownsAgentSession(tenantId: string, agentSessionId: SessionId): boolean
   rememberHeader(header: SessionHeader): void
   workspaceDir(tenantId: string): string
+  ensureTenantWorkspace(
+    user: { englishName?: string; displayName?: string },
+    tenantId: string,
+  ): Promise<{ id: string; path: string; title: string } | undefined>
 }
 
 function payloadId(payload: unknown, key: string): SessionId | undefined {
@@ -174,13 +184,20 @@ function patchSessions(
     sessions.create = async (req) => {
       const tenantId = currentTenantId()
       if (tenantId === undefined) return create(req)
-      const cwd = host.workspaceDir(tenantId)
-      await mkdir(cwd, { recursive: true })
-      const { workspaceId: _workspaceId, ...payload } = req.payload
-      void _workspaceId
+      const principal = currentPrincipal()
+      const tenantWorkspace = principal === undefined
+        ? undefined
+        : await host.ensureTenantWorkspace(principal.user, tenantId)
+      await mkdir(host.workspaceDir(tenantId), { recursive: true })
+      // Keep a workspaceId so the host attaches the session; always pin to the
+      // tenant registration (never a foreign workspace the client may have named).
+      const { workspaceId: _clientWorkspaceId, ...rest } = req.payload
+      void _clientWorkspaceId
       const out = await create({
         ...req,
-        payload: { ...payload, cwd },
+        payload: tenantWorkspace === undefined
+          ? { ...rest, cwd: host.workspaceDir(tenantId) }
+          : { ...rest, workspaceId: tenantWorkspace.id as NonNullable<typeof req.payload.workspaceId> },
       })
       if (out.result.ok) {
         host.rememberHeader({
@@ -524,6 +541,23 @@ function patchSettingsService(ctx: Context): void {
   })
 }
 
+function patchWorkspace(workspace: WorkspaceApi, host: SessionGuardHost): void {
+  const list = workspace.list.bind(workspace)
+  workspace.list = async (req) => {
+    const tenantId = currentTenantId()
+    const principal = currentPrincipal()
+    const tenantWorkspace = tenantId !== undefined && principal !== undefined
+      ? await host.ensureTenantWorkspace(principal.user, tenantId)
+      : undefined
+    const out = await list(req)
+    if (!out.result.ok || tenantId === undefined) return out
+    // Prefer the registry's canonical path (realpath); fall back to the logical dir.
+    const tenantPath = tenantWorkspace?.path ?? host.workspaceDir(tenantId)
+    const items = out.result.value.items.filter(item => item.path === tenantPath)
+    return rpcOk(out.rpcId, { ...out.result.value, items })
+  }
+}
+
 /** Patch apiProxy RPC faces for tenant-scoped sessions, settings, and credentials. */
 export function patchApiAccess(
   proxy: {
@@ -531,6 +565,7 @@ export function patchApiAccess(
     credentials: CredentialsApi
     settings: SettingsApi
     events: EventsApi
+    workspace?: WorkspaceApi
     subagents?: SubagentsApi
     goals?: GoalsApi
     downloads?: DownloadsApi
@@ -545,6 +580,7 @@ export function patchApiAccess(
   patchCredentialsApi(proxy.credentials)
   patchSettingsApi(proxy.settings)
   patchEvents(proxy.events, host)
+  if (proxy.workspace !== undefined) patchWorkspace(proxy.workspace, host)
 }
 
 /** Patch settings/credentials services and agent session metadata. */

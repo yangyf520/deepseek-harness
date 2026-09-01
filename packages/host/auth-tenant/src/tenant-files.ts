@@ -28,9 +28,9 @@ export function tenantRoot(tenantId: string): string {
   return dshHomePath('users', tenantId)
 }
 
-/** `$DSH_HOME/users/<tenant>/workspace`. */
+/** `$DSH_HOME/users/<tenant>/<tenant>` — basename matches the workspace picker title. */
 export function tenantWorkspaceDir(tenantId: string): string {
-  return dshHomePath('users', tenantId, 'workspace')
+  return dshHomePath('users', tenantId, tenantId)
 }
 
 function credentialsPath(tenantId: string): string {

@@ -5,8 +5,26 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { FsTarget } from '@deepseek-ai/dsh-fs'
 import { assertTenantPath, isLexicallyUnder } from '@deepseek-ai/dsh-fs-sandbox'
 import type { SandboxExecutionPolicy, TenantIsolation } from '@deepseek-ai/dsh-sandbox'
-import { activeTenantId } from './principal.ts'
+import { currentPrincipal } from '@deepseek-ai/dsh-host-auth-gate'
 import { tenantRoot, usersRoot } from './tenant-files.ts'
+
+/** Tenant id for the active `/api` request, if any. */
+export function currentTenantId(): string | undefined {
+  return currentPrincipal()?.user.tenantId
+}
+
+/** Tenant id from the `/api` principal or the active agent initiator session. */
+export function activeTenantId(ctx: Context): string | undefined {
+  const fromPrincipal = currentTenantId()
+  if (fromPrincipal !== undefined) return fromPrincipal
+  const agents = ctx.get('agents') as { requireInitiator(): { session: { header: { tenantId?: string } } } } | undefined
+  if (agents === undefined) return undefined
+  try {
+    return agents.requireInitiator().session.header.tenantId
+  } catch {
+    return undefined
+  }
+}
 
 /** Resolve tenant containment roots for the active principal, if any. */
 export function tenantIsolationFor(ctx: Context): TenantIsolation | undefined {

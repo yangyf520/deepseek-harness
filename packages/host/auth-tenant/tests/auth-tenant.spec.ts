@@ -15,8 +15,8 @@ import { AuthGate, type AuthPrincipal } from '@deepseek-ai/dsh-host-auth-gate'
 import { RpcId, type EventsApi, type RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { settingsNamespace, SettingsProvider } from '@deepseek-ai/dsh-settings'
-import { AuthTenant, tenantSlugFromUser } from '../src/index.ts'
-import { runWithPrincipalAsync } from '../src/principal.ts'
+import { AuthTenant, tenantSlugFromUser, tenantWorkspaceTitle } from '../src/index.ts'
+import { runWithPrincipalAsync } from '@deepseek-ai/dsh-host-auth-gate'
 import { setTenantCredential, applySettingsPathOps, mutateTenantSettingsSection, readTenantSettingsSection } from '../src/tenant-files.ts'
 
 function rpcOk<T>(rpcId: RpcId, value: T): RpcResponse<T> {
@@ -83,6 +83,14 @@ function stubHost(
   }],
 ): void {
   ctx.provide('webServer', stubWebServer)
+  ctx.provide('workspaceRegistry', {
+    create: vi.fn(async (path: string, title?: string) => ({
+      id: 'ws-tenant',
+      path,
+      title: title ?? 'workspace',
+      setTitle: vi.fn(async () => {}),
+    })),
+  })
   stubApiProxy(ctx, apiOverrides)
   ctx.provide('sessionPersistence', { list: async () => coldHeaders })
   void ctx.plugin(AuthGate)
@@ -105,6 +113,10 @@ describe('auth-tenant', () => {
     expect(tenant.resolve({ userId: 'ou_1', englishName: 'Alice Wang' })).toBe('alice-wang')
     expect(tenantSlugFromUser('Alice Wang', 'ou_1')).toBe('alice-wang')
     expect(tenantSlugFromUser(undefined, 'ou_fallback')).toBe('ou_fallback')
+    expect(tenantWorkspaceTitle({ englishName: 'Alice Wang', displayName: '爱丽丝' }, 'alice-wang')).toBe('alice-wang')
+    expect(tenantWorkspaceTitle({ displayName: 'Bob' }, 'bob')).toBe('bob')
+    expect(tenantWorkspaceTitle({}, 'bob')).toBe('bob')
+    expect(tenantWorkspaceTitle({ englishName: 'YANGYUFENG' }, 'yangyufeng')).toBe('yangyufeng')
   })
 
   it('filters session.list to owned sessions under an authenticated tenant', async () => {
@@ -250,13 +262,19 @@ describe('auth-tenant', () => {
   })
 
   it('binds auth principal and tracks session ownership from headers', async () => {
-    const { tenant } = await bootTenant()
+    const { ctx, tenant } = await bootTenant()
     const principal: AuthPrincipal = {
       authSid: 'auth-1',
       user: { provider: 'feishu', userId: 'ou_1', englishName: 'Bob' },
     }
     expect(tenant.bindAuthPrincipal(principal)).toBe('bob')
     expect(principal.user.tenantId).toBe('bob')
+    await vi.waitFor(() => {
+      expect(ctx.get('workspaceRegistry')?.create).toHaveBeenCalledWith(
+        tenant.workspaceDir('bob'),
+        'bob',
+      )
+    })
     tenant.rememberHeader({
       version: SESSION_FORMAT_VERSION,
       id: SessionId('session-agent-1'),
@@ -265,7 +283,54 @@ describe('auth-tenant', () => {
     })
     expect(tenant.ownsAgentSession('bob', SessionId('session-agent-1'))).toBe(true)
     expect(tenant.ownsAgentSession('alice', SessionId('session-agent-1'))).toBe(false)
-    expect(tenant.workspaceDir('bob')).toContain('/users/bob/workspace')
+    expect(tenant.workspaceDir('bob')).toContain('/users/bob/bob')
+  })
+
+  it('filters workspace.list to the authenticated tenant workspace', async () => {
+    const { ctx, tenant } = await bootTenant({
+      workspace: {
+        list: async (request: { rpcId: RpcId }) => rpcOk(request.rpcId, {
+          items: [
+            {
+              workspaceId: 'host-ws' as never,
+              path: '/host/deepseek-harness',
+              title: 'deepseek-harness',
+              sessionIds: [],
+              createdAt: '',
+              updatedAt: '',
+            },
+            {
+              workspaceId: 'tenant-ws' as never,
+              path: tenant.workspaceDir('alice-wang'),
+              title: 'Alice Wang',
+              sessionIds: [],
+              createdAt: '',
+              updatedAt: '',
+            },
+          ],
+          archivedSessionIds: [],
+        }),
+      },
+    })
+    const principal: AuthPrincipal = {
+      authSid: 'auth-1',
+      user: { provider: 'feishu', userId: 'ou_1', englishName: 'Alice Wang', tenantId: 'alice-wang' },
+    }
+    const proxy = ctx.get('apiProxy') as { workspace: { list(request: { rpcId: RpcId; payload: {} }): Promise<RpcResponse<{ items: { path: string; title: string }[] }>> } }
+    const out = await runWithPrincipalAsync(principal, async () =>
+      proxy.workspace.list({ rpcId: RpcId('list-1'), payload: {} }),
+    )
+    expect(out.result.ok).toBe(true)
+    if (out.result.ok) {
+      expect(out.result.value.items).toEqual([{
+        workspaceId: 'tenant-ws',
+        path: tenant.workspaceDir('alice-wang'),
+        title: 'Alice Wang',
+        sessionIds: [],
+        createdAt: '',
+        updatedAt: '',
+      }])
+    }
   })
 
   it('restores ownership from persisted session headers after restart', async () => {
@@ -306,6 +371,7 @@ describe('auth-tenant', () => {
         tenantId === 'bob' && sid === SessionId('session-agent-1'),
       rememberHeader: () => {},
       workspaceDir: () => '/tmp',
+      ensureTenantWorkspace: async () => undefined,
     }
     const events: Pick<EventsApi, 'mux' | 'host'> = {
       mux: async function* () {

@@ -7,8 +7,15 @@ import z from '@deepseek-ai/schemastery'
 import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { isLoopbackHostname } from '@deepseek-ai/dsh-client-connection/src/loopback-hostname.ts'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { registerApiBridgeScope } from '@deepseek-ai/dsh-client-connection'
+import type { RpcError, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { SettingsApi } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { WorkspaceApi } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-host-apiproxy'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /* Session service */
@@ -23,6 +30,33 @@ export interface AuthUser {
   tenantId?: string
 }
 
+/** `/auth/me` payload: session user plus deployment flags. */
+export interface AuthMeResponse extends AuthUser {
+  cloud: boolean
+  superAdmin: boolean
+}
+
+/** Parse `SUPER_ADMIN_USERS` (comma-separated login ids / english names). */
+export function parseSuperAdminAllowlist(raw: string | undefined): readonly string[] {
+  if (raw === undefined || raw.trim() === '') return []
+  return raw.split(',').map(entry => entry.trim().toLowerCase()).filter(entry => entry !== '')
+}
+
+export function isCloudDeployment(allowlist: readonly string[]): boolean {
+  return allowlist.length > 0
+}
+
+function isSuperAdminUser(
+  user: { userId: string; englishName?: string },
+  allowlist: readonly string[],
+): boolean {
+  if (!isCloudDeployment(allowlist)) return true
+  const keys = [user.userId, user.englishName]
+    .filter((value): value is string => value !== undefined && value.trim() !== '')
+    .map(value => value.trim().toLowerCase())
+  return keys.some(key => allowlist.includes(key))
+}
+
 export const SESSION_COOKIE = 'auth-sid'
 
 /** Browser principal derived from an auth cookie session. */
@@ -31,12 +65,51 @@ export interface AuthPrincipal {
   user: AuthUser
 }
 
+/** Request-scoped authenticated principal for `/api` dispatch and cloud guards. */
+export const principalAls = new AsyncLocalStorage<AuthPrincipal | undefined>()
+
+/** Read the principal for the current `/api` request, if any. */
+export function currentPrincipal(): AuthPrincipal | undefined {
+  return principalAls.getStore()
+}
+
+/** Run `fn` under `principal` for downstream guards and credential routing. */
+export function runWithPrincipal<T>(principal: AuthPrincipal | undefined, fn: () => T): T {
+  return principalAls.run(principal, fn)
+}
+
+/** Async variant of {@link runWithPrincipal}. */
+export async function runWithPrincipalAsync<T>(
+  principal: AuthPrincipal | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return principalAls.run(principal, async () => fn())
+}
+
 /** Cookie-backed login session registry. */
 export class AuthGate extends Service {
   private readonly sessions = new Map<string, AuthUser>()
+  readonly superAdminAllowlist: readonly string[]
+  readonly cloudDeployment: boolean
 
   constructor(ctx: Context) {
     super(ctx, 'authGate')
+    this.superAdminAllowlist = parseSuperAdminAllowlist(process.env.SUPER_ADMIN_USERS)
+    this.cloudDeployment = isCloudDeployment(this.superAdminAllowlist)
+  }
+
+  /** Whether `user` may manage global login channels. */
+  isSuperAdmin(user: AuthUser): boolean {
+    return isSuperAdminUser(user, this.superAdminAllowlist)
+  }
+
+  /** Build the `/auth/me` JSON body for one authenticated user. */
+  meResponse(user: AuthUser): AuthMeResponse {
+    return {
+      ...user,
+      cloud: this.cloudDeployment,
+      superAdmin: this.isSuperAdmin(user),
+    }
   }
 
   createSession(user: AuthUser): string {
@@ -505,14 +578,52 @@ async function callbackHandler(
 }
 
 function meHandler(ctx: Context, req: IncomingMessage, res: ServerResponse): void {
+  const cloud = ctx.authGate.cloudDeployment
   const user = ctx.authGate.userFromRequest(req)
   if (user === undefined) {
     res.writeHead(401, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ error: 'not authenticated' }))
+    res.end(JSON.stringify({ error: 'not authenticated', cloud }))
     return
   }
   res.writeHead(200, { 'content-type': 'application/json' })
-  res.end(JSON.stringify(user))
+  res.end(JSON.stringify(ctx.authGate.meResponse(user)))
+}
+
+function patchCloudGuards(
+  proxy: {
+    workspace: Pick<WorkspaceApi, 'create'>
+    settings: Pick<SettingsApi, 'update' | 'replace' | 'mutate'>
+  },
+  gate: AuthGate,
+): void {
+  const rpcErr = <T>(rpcId: RpcRequest<unknown>['rpcId'], error: RpcError): RpcResponse<T> => (
+    { rpcId, result: { ok: false, error } }
+  )
+  const denySettings = <T>(request: RpcRequest<{ ns: string }>): RpcResponse<T> | undefined => {
+    if (String(request.payload.ns) !== String(AUTH_CHANNELS_NS)) return undefined
+    const user = currentPrincipal()?.user
+    if (user !== undefined && gate.isSuperAdmin(user)) return undefined
+    return rpcErr(request.rpcId, {
+      code: 'settings-rejected',
+      message: 'login channel settings are restricted to super administrators in this deployment',
+      details: { ns: request.payload.ns },
+    })
+  }
+
+  proxy.workspace.create = request => rpcErr(request.rpcId, {
+    code: 'bad-request',
+    message: 'adding workspaces is disabled in this deployment',
+    details: { issues: [] },
+  })
+
+  for (const method of ['mutate', 'update', 'replace'] as const) {
+    const original = proxy.settings[method].bind(proxy.settings)
+    proxy.settings[method] = async (request) => {
+      const denied = denySettings(request)
+      if (denied !== undefined) return denied
+      return original(request)
+    }
+  }
 }
 
 function logoutHandler(ctx: Context, req: IncomingMessage, res: ServerResponse): void {
@@ -543,6 +654,28 @@ function refuseUnauthenticated(req: IncomingMessage, res: ServerResponse): void 
   res.end()
 }
 
+/** Client halves of the directory-picker seam; host backends stay mounted for api-proxy. */
+const DIRECTORY_PICKER_SURFACE_PACKAGES = new Set([
+  '@deepseek-ai/dsh-client-ui-directory-picker-native',
+  '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+])
+
+/** Drop directory-flow client plugins in cloud mode so workspace add stays hidden. */
+async function unmountDirectoryPickerSurfaces(ctx: Context): Promise<() => void> {
+  const ids: string[] = []
+  for (const entry of ctx.loader.entries()) {
+    if (!DIRECTORY_PICKER_SURFACE_PACKAGES.has(entry.options.name)) continue
+    const id = entry.options.id
+    if (id === undefined) continue
+    ids.push(id)
+  }
+  for (const id of ids) {
+    if (ctx.loader.store[id] === undefined) continue
+    await ctx.loader.remove(id)
+  }
+  return () => {}
+}
+
 /* ───────────────────────────────────────────────
  * Plugin entry
  * ─────────────────────────────────────────────── */
@@ -560,6 +693,22 @@ export function apply(ctx: Context): void {
   let source: () => Record<string, ChannelConfig> = () => entry
 
   ctx.plugin(AuthGate)
+
+  ctx.inject(['authGate'], (sctx) => {
+    sctx.effect(() => registerApiBridgeScope((req, dispatch) =>
+      runWithPrincipalAsync(sctx.authGate.principalFromRequest(req), dispatch)),
+    'auth-gate: /api principal scope')
+  })
+
+  ctx.inject(['apiProxy', 'authGate'], (sctx) => {
+    if (!sctx.authGate.cloudDeployment) return
+    patchCloudGuards(sctx.apiProxy, sctx.authGate)
+  })
+
+  ctx.inject(['loader', 'authGate', 'directoryPicker'], (sctx) => {
+    if (!sctx.authGate.cloudDeployment) return
+    sctx.effect(() => unmountDirectoryPickerSurfaces(sctx), 'auth-gate: cloud directory surfaces')
+  })
 
   installSettingsSection(ctx, AUTH_CHANNELS_NS, AUTH_CHANNELS_SCHEMA, entry, {
     setSource: (current) => { source = current },
@@ -606,3 +755,5 @@ export function apply(ctx: Context): void {
     })
   })
 }
+
+export { isSuperAdminUser as isSuperAdmin }

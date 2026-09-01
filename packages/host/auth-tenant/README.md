@@ -10,7 +10,7 @@ Per-user tenant isolation for the web host: signed-in users can list, create, an
 |------------|-------------|
 | **Session ownership** | Each agent session is bound to the signed-in user's `tenantId` |
 | **Sessions API filtering** | `list` / `search` return only owned sessions; mutating calls reject cross-tenant access |
-| **Workspace cwd** | New sessions use `$DSH_HOME/users/<tenant>/workspace` as `cwd` |
+| **Workspace cwd** | New sessions use `$DSH_HOME/users/<tenant>/<tenant>` as `cwd` (basename matches picker title) |
 | **Durable ownership (P0)** | `SessionHeader.tenantId` is persisted; filtering survives process restart |
 | **Credential isolation (P1)** | Model API keys live in `$DSH_HOME/users/<tenant>/.credentials.yaml`; `AUTH_*` OAuth secrets stay global |
 | **Settings isolation (P1)** | Per-tenant user layers in `$DSH_HOME/users/<tenant>/settings.yaml`; `auth-channels` stays global; `ctx.settings.get()` overlays tenant layers at runtime |
@@ -56,7 +56,7 @@ flowchart LR
   ALS --> API
 ```
 
-1. **At login** (`auth-gate` callback): `authTenant.bindAuthPrincipal` resolves `tenantId` and stores it on `AuthUser.tenantId`.
+1. **At login** (`auth-gate` callback): `authTenant.bindAuthPrincipal` resolves `tenantId`, stores it on `AuthUser.tenantId`, and registers `$DSH_HOME/users/<tenant>/<tenant>` in the workspace registry with the lowercase english-name slug as the display title (Feishu `en_name` is often ALL CAPS).
 2. **On `/api` requests** (`client-connection` bridge + this package's scope): read the principal from the cookie and run the full connection dispatch chain inside `AsyncLocalStorage` (including privileged methods and Typert intercepts).
 3. **On Sessions RPC** (this package's patch): filter or reject based on the principal's `tenantId`.
 
@@ -75,7 +75,8 @@ Always a per-user slug from `englishName` or `userId` (lowercase, `[a-z0-9._-]` 
 |----------|--------------|
 | Sessions API: `list`, `search`, `create`, `history`, `prompt`, `fork`, … | Session persistence still shares one store |
 | **`subagent.*`, `goal.*`, `GET /api/session.export`** | |
-| New session `cwd` under per-user workspace | **workspace.*** and other `/api` namespaces (P1) |
+| New session `cwd` under per-user workspace | Other **workspace.*** RPC (rename, delete, reorder) and workspace host frames |
+| **`workspace.list`** filtered to the tenant workspace path | |
 | Durable `SessionHeader.tenantId` ownership | Workspace host frames remain shared |
 | Credentials API + agent runtime (tenant `.credentials.yaml`) | |
 | Settings API + `ctx.settings.get()` tenant overlay | |
@@ -87,8 +88,8 @@ flowchart TB
   subgraph isolated [Isolated by this package]
     S1[User A sessions]
     S2[User B sessions]
-    W1["$DSH_HOME/users/a/workspace"]
-    W2["$DSH_HOME/users/b/workspace"]
+    W1["$DSH_HOME/users/a/a"]
+    W2["$DSH_HOME/users/b/b"]
   end
   subgraph shared [Still shared]
     FS[Global filesystem]
@@ -113,7 +114,7 @@ sequenceDiagram
   G->>T: bindAuthPrincipal
   T->>T: user.tenantId = resolve(user)
   U->>T: POST /api sessions.create
-  T->>T: mkdir users/tenant/workspace
+  T->>T: mkdir users/tenant/tenant
   T->>API: create(cwd=workspace)
   T->>T: rememberHeader(sessionId, tenantId)
   U->>T: sessions.list
@@ -133,10 +134,10 @@ Fixed in code (not configurable):
 ### Workspace path
 
 ```text
-$DSH_HOME/users/<tenantId>/workspace
+$DSH_HOME/users/<tenantId>/<tenantId>
 ```
 
-Created recursively on first session creation.
+Created recursively on login and on first session creation.
 
 ## Working with auth-gate
 
