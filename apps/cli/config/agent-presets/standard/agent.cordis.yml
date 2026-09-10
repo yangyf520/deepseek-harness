@@ -250,3 +250,10 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
+
+# Knowledge retrieval when the host mounts `@deepseek-ai/dsh-knowledge` (web-app patch).
+# `collections: ['*']` allows any indexed library; tighten per deployment preset.
+- id: tool-knowledge
+  name: '@deepseek-ai/dsh-knowledge/tools'
+  config:
+    collections: ['*']
