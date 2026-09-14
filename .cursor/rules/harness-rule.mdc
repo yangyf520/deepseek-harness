@@ -1,0 +1,41 @@
+---
+description: Harness 开发原则 — 最简 + 最佳，插件优先
+alwaysApply: true
+---
+
+# Harness 开发：最简 + 最佳
+
+## 定义
+
+| | 要求 |
+|---|---|
+| **最简** | 先用现成控件：`inject`、service / event patch、capability seam、session / ALS，不新造子系统 |
+| **最佳** | 逻辑归位、enforcement 在 provider/seam；同类代码单文件；相关能力收敛同一插件 |
+| **边界** | 能插件解决就不改已有源码；新能力以新包 + 挂载为主 |
+| **收拢** | 尽量少改已有文件；同域 src / 测试各收成尽量少的文件，不按阶段或功能点拆散 |
+
+## 决策顺序（逐级升级）
+
+1. **插件内** — `ctx.inject` + patch 现有 service（含 Host API 门面），不往门面包加方法、类型、handler
+2. **复用** — import 已有纯函数，不复制
+3. **改已有源码** — 仅当 patch 已证 fragile，或缺 unavoidable 持久字段 / 类型；改动面保持最小（接线一行、导出已有工具）
+
+## 允许动已有源码的三类
+
+- 持久 / session 字段
+- 一行衔接（登录回调、preset 挂载）
+- 导出已有工具供插件复用（不是新子系统）
+
+挂载只需 composition（cordis 行、workspace 依赖、tsconfig）。关闭的 RPC 表加不进去就先不接 Host 面，不为此改门面包。
+
+## 插件约定
+
+- **mount = enable**：无 cordis `config`，除非部署必配项
+- **enforcement 层**：provider > tool pre-execute；跨 seam 缺口写 README，不假装已隔离
+- **文件**：按能力域分文件，同域不拆散；一个包的测试默认一个文件（不同 vitest environment 才可再拆）
+
+## 反模式
+
+- 为单插件改 loop、扩 sandbox 类型、改 Host RPC 注册表 / fetch 门面、在 tool 层重造 resolve/containment
+- 同域拆多个平行文件或按 P0/P1/P2 拆测试
+- 在无关插件里硬拦其他能力的路径
