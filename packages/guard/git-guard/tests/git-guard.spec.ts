@@ -15,24 +15,24 @@ import { apply, classifyGitShellCommand } from '@deepseek-ai/dsh-git-guard'
 
 const testSignal = new AbortController().signal
 
-function bashExec(arguments_: Record<string, unknown>): ToolExecution {
+function bashExec(arguments_: unknown): ToolExecution {
   return {
     token: Symbol('tool') as ToolExecutionToken,
     callId: ToolCallId('pre'),
     name: 'bash',
-    arguments: Object.freeze(arguments_),
+    arguments: Object.freeze(arguments_) as ToolExecution['arguments'],
     signal: testSignal,
     rootCallId: ToolCallId('pre'),
   }
 }
 
-async function bootTools(plugin: unknown = gitGuard, config?: gitGuard.Config): Promise<Context> {
+async function bootTools(config?: gitGuard.Config): Promise<Context> {
   const ctx = new Context()
   const { default: SystemPrompt } = await import('@deepseek-ai/dsh-system-prompt')
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  if (config === undefined) await ctx.plugin(plugin)
-  else await ctx.plugin(plugin, config)
+  if (config === undefined) await ctx.plugin(gitGuard)
+  else await ctx.plugin(gitGuard, config)
   return ctx
 }
 
@@ -158,25 +158,27 @@ describe('git-guard pre-execute', () => {
     expect(statusRan).toBe(true)
   })
 
-  it('ignores non-string bash command arguments', async () => {
+  it('ignores non-object and non-string bash command arguments', async () => {
     const ctx = new Context()
     apply(ctx, { askPush: false })
-    let nextCalled = false
-    const decision = await ctx.waterfall(
-      ctx as never,
-      'tools/pre-execute',
-      bashExec({ command: 42 }),
-      () => {
-        nextCalled = true
-        return Promise.resolve({ kind: 'allow' as const })
-      },
-    )
-    expect(nextCalled).toBe(true)
-    expect(decision).toEqual({ kind: 'allow' })
+    for (const arguments_ of [{ command: 42 }, null, ['git', 'push'], 7] as const) {
+      let nextCalled = false
+      const decision = await ctx.waterfall(
+        ctx as never,
+        'tools/pre-execute',
+        bashExec(arguments_),
+        () => {
+          nextCalled = true
+          return Promise.resolve({ kind: 'allow' as const })
+        },
+      )
+      expect(nextCalled).toBe(true)
+      expect(decision).toEqual({ kind: 'allow' })
+    }
   })
 
   it('allows push when askPush is false', async () => {
-    const ctx = await bootTools(gitGuard, { askPush: false, protectedBranches: ['prd'] })
+    const ctx = await bootTools({ askPush: false, protectedBranches: ['prd'] })
     let ran = false
     ctx.tools.register(defineContentToolFixture({
       name: 'pwsh',
