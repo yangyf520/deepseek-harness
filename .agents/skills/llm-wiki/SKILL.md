@@ -20,6 +20,10 @@ Upload documents or ask questions in normal language. Do **not** require the use
 
 Report briefly what was ingested or what the wiki did not cover; do not narrate internal routing unless the user asks.
 
+## Separation from coding
+
+If the turn is implementing or verifying **code** (`dev-loop` or equivalent): use this skill **read-only** (Query Lite / indexes). Do **not** ingest, compile, init, or otherwise mutate `.wiki/` on that path. Mutating wiki is only for knowledge turns (uploads, inbox, explicit ingest/maintain).
+
 ## Auto-load
 
 Load this skill on the first matching turn (do not wait for the user to name it):
