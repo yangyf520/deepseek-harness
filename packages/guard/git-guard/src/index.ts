@@ -115,7 +115,9 @@ function escapeRegExp(value: string): string {
 
 function shellCommandOf(exec: ToolExecution): string | undefined {
   if (!SHELL_TOOLS.has(exec.name)) return undefined
-  const command = exec.arguments['command']
+  const args = exec.arguments
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return undefined
+  const command = (args as Record<string, unknown>)['command']
   return typeof command === 'string' ? command : undefined
 }
 
