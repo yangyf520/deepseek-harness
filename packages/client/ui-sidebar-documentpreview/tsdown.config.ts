@@ -53,10 +53,33 @@ const pdfWorker: NonNullable<UserConfig['plugins']> = [{
   },
 }]
 
+/**
+ * Mammoth declares a `browser` field in its package.json, but rolldown does not
+ * resolve it automatically. Map the Node-only modules to their browser-safe
+ * counterparts so the client bundle does not pull in `fs`, `os`, or `url`.
+ */
+function mammothBrowserAliases(): Record<string, string> {
+  const root = dirname(require.resolve('mammoth/package.json'))
+  return {
+    [join(root, 'lib/unzip.js')]: join(root, 'browser/unzip.js'),
+    [join(root, 'lib/docx/files.js')]: join(root, 'browser/docx/files.js'),
+  }
+}
+
 export default (options: Parameters<typeof bundle>[0]): UserConfig[] => bundle(options).map(config =>
   config.name?.endsWith('/client') === true ? {
     ...config,
     plugins: [config.plugins, pdfWorker],
     define: { ...config.define, __DSH_PDFJS_ASSETS__: pdfAssets() },
+    inputOptions: {
+      ...(config.inputOptions as Record<string, unknown> | undefined),
+      resolve: {
+        ...((config.inputOptions as { resolve?: Record<string, unknown> } | undefined)?.resolve ?? {}),
+        alias: {
+          ...((config.inputOptions as { resolve?: { alias?: Record<string, string> } } | undefined)?.resolve?.alias ?? {}),
+          ...mammothBrowserAliases(),
+        },
+      },
+    },
   } : config,
 )
