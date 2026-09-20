@@ -16,6 +16,7 @@ export interface AuditAnchor {
 /** One audit finding produced by the agent. */
 export interface AuditFinding {
   readonly id: string
+  readonly title?: string
   readonly anchor: AuditAnchor
   readonly issue: string
   readonly replacement: string

@@ -33,6 +33,7 @@ const auditStateSchema = z.object({
   documentPath: z.string(),
   findings: z.array(z.object({
     id: z.string(),
+    title: z.string().optional(),
     anchor: z.object({ path: z.string(), line: z.number().int(), quote: z.string() }),
     issue: z.string(),
     replacement: z.string(),
@@ -85,6 +86,7 @@ const auditWriteTool = defineTool({
         additionalProperties: false,
         properties: {
           id: { type: 'string', required: true, description: 'Unique finding identifier within this round.' },
+          title: { type: 'string', required: true, description: 'One-sentence plain-language summary of WHAT IS WRONG, max 20 characters. Use everyday language, not jargon. Example: "登录流程跟设计稿对不上" NOT "P0 凭据转交交互与原型冲突".' },
           anchor: {
             type: 'object',
             additionalProperties: false,
@@ -96,7 +98,7 @@ const auditWriteTool = defineTool({
             },
           },
           issue: { type: 'string', required: true, description: 'Description of the problem.' },
-          replacement: { type: 'string', required: true, description: 'Suggested replacement text.' },
+          replacement: { type: 'string', required: true, description: 'Suggested replacement text. MUST be inside each finding object, NOT at the top level.' },
         },
       },
     },

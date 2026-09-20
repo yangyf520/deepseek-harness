@@ -374,6 +374,12 @@
     - id: ui-trajectory
       name: '@deepseek-ai/dsh-client-ui-trajectory'
 
+    # Document audit: review findings card and sidebar panel.
+    - id: audit-review
+      name: '@deepseek-ai/dsh-audit-review'
+    - id: ui-audit-review
+      name: '@deepseek-ai/dsh-client-ui-audit-review'
+
 # ── the agent plane moves behind agent presets ─────────────────────────────
 #
 # Every row below composes what ONE agent contributes to the host registries:
