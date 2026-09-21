@@ -19,12 +19,9 @@ export const zh = {
   'action.accept': '接受',
   'action.reject': '拒绝',
   'action.undo': '撤销',
-  'action.cancel': '取消',
-  'confirm.reject': '确认拒绝这条发现？',
+  'action.withdraw': '撤回',
   'status.accepted': '已接受',
   'status.rejected': '已拒绝',
-  'rejected.show': '查看已拒绝',
-  'rejected.hide': '收起已拒绝',
 } satisfies Record<string, string>
 
 /** The audit namespace key union. */
@@ -49,10 +46,7 @@ export const en = {
   'action.accept': 'Accept',
   'action.reject': 'Reject',
   'action.undo': 'Undo',
-  'action.cancel': 'Cancel',
-  'confirm.reject': 'Reject this finding?',
+  'action.withdraw': 'Withdraw',
   'status.accepted': 'Accepted',
   'status.rejected': 'Rejected',
-  'rejected.show': 'Show rejected',
-  'rejected.hide': 'Hide rejected',
 } satisfies Record<AuditKey, string>

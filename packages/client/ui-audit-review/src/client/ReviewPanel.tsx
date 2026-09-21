@@ -257,7 +257,17 @@ function highlightQuote(container: HTMLElement, quote: string, severity: Severit
   return markQuote(container, quote, severity)[0] ?? null
 }
 
-/** Single finding card: accepting writes the suggestion into the document, undoing takes it back. */
+/** Header border color per decision: green once accepted, red once rejected, neutral while pending. */
+const DECISION_BORDER: Record<'accept' | 'reject' | 'pending', string> = {
+  accept: 'rgb(34, 139, 34)',
+  reject: 'rgb(217, 45, 32)',
+  pending: 'rgb(220, 225, 235)',
+}
+
+/**
+ * Single finding card: accepting writes the suggestion into the document and undoing takes it back;
+ * rejecting leaves the document alone and keeps the card in the list until the rejection is withdrawn.
+ */
 function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
   finding: AuditFinding
   index: number
@@ -267,10 +277,13 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
   onApply: (findingId: string, round: number) => Promise<void>
   decided?: 'accept' | 'reject' | undefined
 }) {
-  const [confirming, setConfirming] = useState(false)
   // The file rewrite reads the recorded decisions, so the decision has to land before it runs.
   const decide = (decision: AuditDecision): void => {
     void onDecide(finding.id, round, decision).then(() => onApply(finding.id, round))
+  }
+  // A rejection and its withdrawal leave the document holding the accepted findings it already has.
+  const setRejection = (decision: 'reject' | 'undo'): void => {
+    void onDecide(finding.id, round, decision)
   }
   const parsed = parseIssue(finding.issue)
   const severity = finding.severity ?? parsed.severity
@@ -281,7 +294,7 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
   return (
     <div style={{
       padding: '12px',
-      border: `1px solid ${decided === 'accept' ? 'rgb(34, 139, 34)' : 'rgb(220, 225, 235)'}`,
+      border: `1px solid ${DECISION_BORDER[decided ?? 'pending']}`,
       borderRadius: '12px',
       background: 'rgb(255, 255, 255)',
       marginBottom: '8px',
@@ -312,7 +325,7 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
               background: 'rgb(34, 139, 34)', color: 'white', border: 'none', borderRadius: '999px',
               cornerShape: 'round', flexShrink: 0, height: '24px',
             } as CSSProperties}>{t('action.accept')}</button>
-            <button type="button" onClick={() => setConfirming(true)} style={{
+            <button type="button" onClick={() => setRejection('reject')} style={{
               padding: '4px 12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
               background: 'white', color: 'rgb(217, 45, 32)', border: '1px solid rgb(217, 45, 32)', borderRadius: '999px',
               cornerShape: 'round', flexShrink: 0, height: '24px',
@@ -325,6 +338,13 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
             background: 'white', color: 'rgb(34, 139, 34)', border: '1px solid rgb(34, 139, 34)', borderRadius: '999px',
             cornerShape: 'round', flexShrink: 0, height: '24px',
           } as CSSProperties}>{t('action.undo')}</button>
+        )}
+        {decided === 'reject' && (
+          <button type="button" onClick={() => setRejection('undo')} style={{
+            padding: '4px 12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            background: 'white', color: 'rgb(217, 45, 32)', border: '1px solid rgb(217, 45, 32)', borderRadius: '999px',
+            cornerShape: 'round', flexShrink: 0, height: '24px',
+          } as CSSProperties}>{t('action.withdraw')}</button>
         )}
       </div>
 
@@ -346,37 +366,6 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
       }}>
         <strong style={{ color: 'rgb(23, 92, 211)' }}>{t('finding.suggestion')}:</strong> {finding.replacement || t('finding.delete')}
       </div>
-
-      {/* Confirmation before the card closes on a rejection */}
-      {confirming && (
-        <div onClick={() => setConfirming(false)} style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgb(16 24 40 / 32%)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <div onClick={event => event.stopPropagation()} style={{
-            background: 'white', borderRadius: '10px', padding: '16px', width: '260px',
-            boxShadow: '0 8px 24px rgb(16 24 40 / 18%)',
-          }}>
-            <div style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '14px', color: 'rgb(30, 35, 45)' }}>
-              {t('confirm.reject')}
-            </div>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setConfirming(false)} style={{
-                padding: '4px 12px', fontSize: '12px', cursor: 'pointer',
-                background: 'white', color: 'rgb(102, 112, 133)', border: '1px solid rgb(220, 225, 235)', borderRadius: '6px',
-              }}>{t('action.cancel')}</button>
-              <button type="button" autoFocus onClick={() => {
-                setConfirming(false)
-                onDecide(finding.id, round, 'reject')
-              }} style={{
-                padding: '4px 12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
-                background: 'rgb(217, 45, 32)', color: 'white', border: 'none', borderRadius: '6px',
-              }}>{t('action.reject')}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -389,8 +378,6 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectionKey, setSelectionKey] = useState(0)
   const [view, setView] = useState<'original' | 'text' | null>(null)
-  // Whether the rejected findings below the pending list are expanded.
-  const [showRejected, setShowRejected] = useState(false)
   const [docxReady, setDocxReady] = useState(false)
   // Set once the original renders, so re-rendering for a replacement shows no loading gap.
   const [docxShown, setDocxShown] = useState(false)
@@ -560,7 +547,7 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
   const accepted = Object.entries(state.decisions).filter(([, d]) => d === 'accept').length
   const rejected = Object.entries(state.decisions).filter(([, d]) => d === 'reject').length
 
-  // Wrapper shared by pending and rejected findings: selecting a card highlights its quote in the document.
+  // Card wrapper: selecting a card highlights its quote in the document.
   const renderCard = (finding: AuditFinding, index: number) => (
     <div key={finding.id} onClick={(event) => {
       cardRef.current = event.currentTarget
@@ -568,7 +555,6 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
       setSelectionKey(k => k + 1)
     }} style={{
       cursor: 'pointer',
-      opacity: state.decisions[finding.id] === 'reject' ? 0.65 : undefined,
       outline: selectedId === finding.id ? '2px solid rgb(23, 92, 211)' : 'none',
       borderRadius: '12px',
       marginBottom: '12px',
@@ -595,20 +581,9 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
         <div style={{ fontSize: '12px', color: 'rgb(102, 112, 133)', marginBottom: '16px' }}>
           {accepted} {t('status.accepted')} · {rejected} {t('status.rejected')} · {findings.length - accepted - rejected} {t('overview.findings')}
         </div>
-        {/* Increment selectionKey on each click to force the highlight effect to re-run. A rejected
-            finding leaves the pending list but keeps the number it was audited under. */}
-        {findings.map((finding, index) => ({ finding, index }))
-          .filter(({ finding }) => state.decisions[finding.id] !== 'reject')
-          .map(({ finding, index }) => renderCard(finding, index))}
-        {rejected > 0 && (
-          <div style={{ fontSize: '12px', color: 'rgb(23, 92, 211)', cursor: 'pointer', marginBottom: '12px' }}
-            onClick={() => setShowRejected(v => !v)}>
-            {showRejected ? t('rejected.hide') : `${t('rejected.show')} (${rejected})`}
-          </div>
-        )}
-        {showRejected && findings.map((finding, index) => ({ finding, index }))
-          .filter(({ finding }) => state.decisions[finding.id] === 'reject')
-          .map(({ finding, index }) => renderCard(finding, index))}
+        {/* Increment selectionKey on each click to force the highlight effect to re-run. Every card
+            keeps the number it was audited under; a rejected card stays here and is withdrawn from it. */}
+        {findings.map((finding, index) => renderCard(finding, index))}
       </div>
 
       {/* Right: document, rendered from the original .docx when the session has one */}
