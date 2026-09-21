@@ -23,6 +23,8 @@ export const zh = {
   'confirm.reject': '确认拒绝这条发现？',
   'status.accepted': '已接受',
   'status.rejected': '已拒绝',
+  'rejected.show': '查看已拒绝',
+  'rejected.hide': '收起已拒绝',
 } satisfies Record<string, string>
 
 /** The audit namespace key union. */
@@ -51,4 +53,6 @@ export const en = {
   'confirm.reject': 'Reject this finding?',
   'status.accepted': 'Accepted',
   'status.rejected': 'Rejected',
+  'rejected.show': 'Show rejected',
+  'rejected.hide': 'Hide rejected',
 } satisfies Record<AuditKey, string>
