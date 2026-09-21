@@ -206,7 +206,78 @@ async function anchorProblems(ctx: Context, cwd: string | undefined, findings: r
 }
 
 /** The audit_write tool definition. */
-const auditWriteToolDescription = 'Record audit findings after analyzing a document. MUST be called when the user asks to audit/review a document. Each finding cites a specific location with a quoted anchor and a replacement suggestion. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing, ambiguous, or on a different line rejects the whole call, so fix the anchor and call again.'
+const auditWriteToolDescription = 'Record audit findings after analyzing a document. MUST be called when the user asks to audit/review a document. Each finding cites a specific location with a quoted anchor and a replacement suggestion. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing, ambiguous, or on a different line rejects the whole call, so fix the anchor and call again. For more than 3 findings write work/findings.json with Python json.dump and pass findingsFile instead of hand-writing the inline array: long inline arrays drop required fields and waste retries.'
+
+/**
+ * Problems in one parsed findings file, element by element: file content skips the tool schema's
+ * argument validation, so the same required fields are checked here.
+ * @param value - Parsed JSON the findings file held.
+ * @returns one message per unusable element; empty when the array is usable.
+ */
+function fileFindingProblems(value: unknown): string[] {
+  if (!Array.isArray(value)) return ['findingsFile must hold a JSON array of finding objects']
+  const problems: string[] = []
+  value.forEach((record, index) => {
+    const at = `findings[${index}]`
+    if (typeof record !== 'object' || record === null) {
+      problems.push(`${at} is not an object`)
+      return
+    }
+    const entries = record as Record<string, unknown>
+    for (const field of ['id', 'issue', 'replacement'] as const) {
+      if (typeof entries[field] !== 'string' || entries[field] === '') problems.push(`${at}.${field} is missing or empty`)
+    }
+    if (entries.title !== undefined && typeof entries.title !== 'string') problems.push(`${at}.title is not a string`)
+    const anchor = entries.anchor
+    if (typeof anchor !== 'object' || anchor === null) {
+      problems.push(`${at}.anchor is missing`)
+      return
+    }
+    const anchorEntries = anchor as Record<string, unknown>
+    for (const field of ['path', 'quote'] as const) {
+      if (typeof anchorEntries[field] !== 'string' || anchorEntries[field] === '') problems.push(`${at}.anchor.${field} is missing or empty`)
+    }
+    if (!Number.isInteger(anchorEntries.line)) problems.push(`${at}.anchor.line is missing or not an integer`)
+  })
+  return problems
+}
+
+/**
+ * Findings from the inline array or the JSON file named by `findingsFile`; the file wins because a
+ * Python-written array is the reliable shape for large rounds.
+ * @param ctx - Host context carrying the filesystem service.
+ * @param cwd - Session working directory resolving `findingsFile`.
+ * @param args - Tool arguments naming one of the two findings sources.
+ * @returns the findings to record, or throws the message naming what to fix.
+ */
+async function resolveFindings(
+  ctx: Context,
+  cwd: string | undefined,
+  args: { findings?: unknown; findingsFile?: unknown },
+): Promise<AuditFinding[]> {
+  const file = args.findingsFile
+  if (typeof file === 'string' && file !== '') {
+    let raw: string
+    try {
+      raw = await ctx.fs.readText(await ctx.fs.resolve(file, { ...cwd !== undefined ? { cwd } : {} }))
+    } catch {
+      throw new Error(`audit_write: findingsFile "${file}" is not readable as UTF-8 text`)
+    }
+    let value: unknown
+    try {
+      value = JSON.parse(raw)
+    } catch (error) {
+      throw new Error(`audit_write: findingsFile "${file}" is not valid JSON: ${String(error)}`)
+    }
+    const problems = fileFindingProblems(value)
+    if (problems.length > 0) {
+      throw new Error(`audit_write: fix these in the findings file and call again:\n${problems.join('\n')}`)
+    }
+    return value as AuditFinding[]
+  }
+  if (Array.isArray(args.findings)) return args.findings as AuditFinding[]
+  throw new Error('audit_write: provide findings inline or as findingsFile')
+}
 
 /**
  * The audit_write tool; validation rejects unusable anchors before they are logged.
@@ -222,14 +293,13 @@ function createAuditWriteTool(ctx: Context) {
       documentPath: { type: 'string', required: true, description: 'Path to the original document being audited (the file the user uploaded or specified).' },
       findings: {
         type: 'array',
-        required: true,
-        description: 'List of findings.',
+        description: 'Inline findings; reliable up to 3. For more, write work/findings.json with Python json.dump and pass findingsFile instead. Ignored when findingsFile is set.',
         items: {
           type: 'object',
           additionalProperties: false,
           properties: {
             id: { type: 'string', required: true, description: 'Unique finding identifier within this round.' },
-            title: { type: 'string', required: true, description: 'CRITICAL: Max 20 Chinese characters. One plain-language sentence summarizing WHAT IS WRONG. Use everyday language. GOOD: "登录流程跟设计稿对不上" (11 chars). BAD: "P0 凭据转交交互与原型冲突" (too technical) or anything over 20 characters. Count characters before submitting.' },
+            title: { type: 'string', description: 'Recommended: max 20 Chinese characters. One plain-language sentence summarizing WHAT IS WRONG. Use everyday language. GOOD: "登录流程跟设计稿对不上" (11 chars). BAD: "P0 凭据转交交互与原型冲突" (too technical) or anything over 20 characters. When omitted the card falls back to the issue text.' },
             anchor: {
               type: 'object',
               additionalProperties: false,
@@ -244,6 +314,10 @@ function createAuditWriteTool(ctx: Context) {
             replacement: { type: 'string', required: true, description: 'Text that replaces exactly the quoted span; it must read as correct document prose after the swap. For a whole-line deletion set it to the empty string (the line is removed). NEVER put instructions, parentheses, or notes such as （删除该行） here. MUST be inside each finding object, NOT at the top level.' },
           },
         },
+      },
+      findingsFile: {
+        type: 'string',
+        description: 'Path to a JSON file holding the findings array, preferred for more than 3 findings; the file is validated like the inline array and wins when both are given.',
       },
     },
     output: {
@@ -263,7 +337,7 @@ function createAuditWriteTool(ctx: Context) {
     async execute(args, exec) {
       const session = exec.agent?.session
       if (session === undefined) throw new Error('audit_write: no active session')
-      const findings = args.findings as AuditFinding[]
+      const findings = await resolveFindings(ctx, session.header.cwd, args)
       const problems = await anchorProblems(ctx, session.header.cwd, findings)
       if (problems.length > 0) {
         throw new Error(`audit_write: every anchor must match the audited file; fix these and call again:\n${problems.join('\n')}`)
@@ -296,7 +370,7 @@ export class AuditReviewService extends TypertRemoteService {
 
 ## Step 1: Generate HTML preview and text extraction
 Before auditing, convert the document to HTML for preview and plain text for quoting:
-1. Use python-docx (via \`load_workspace_dependencies\`) to read the document
+1. Use python-docx (via \`load_workspace_dependencies\`) to read the document; when writing the converter, guard every optional attribute: \`paragraph.style\` and \`paragraph.alignment\` are \`None\` for paragraphs without explicit formatting, so read them as \`p.style.name if p.style is not None else ''\` — an unguarded \`block.style.name\` crashes the whole conversion
 2. Generate an HTML file preserving structure (paragraphs, tables, headings, lists)
    - Save as \`work/<name>.html\` (same base name as the text file)
 3. Extract plain text from the HTML (strip tags, preserve line breaks)
@@ -306,6 +380,7 @@ Before auditing, convert the document to HTML for preview and plain text for quo
 ## Step 2: Audit the document
 1. Read the plain text file (\`work/<name>.txt\`) for analysis
 2. Call \`audit_write\` to record all findings
+   - With 3 or fewer findings pass them inline; with more, build the array in Python and \`json.dump\` it to \`work/findings.json\`, then pass \`findingsFile\` — hand-written long inline arrays drop required fields and every drop rejects the whole call
    - \`anchor.path\` MUST point to the text file (\`work/<name>.txt\`)
    - \`anchor.line\` MUST be the 1-based line that contains the quote
    - \`anchor.quote\` MUST be copied verbatim and appear exactly once in the file; extend it with surrounding words when a short quote repeats
