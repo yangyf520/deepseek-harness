@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { renderAsync } from 'docx-preview'
+import { parseAsync, renderDocument } from 'docx-preview'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AuditDecision } from '@deepseek-ai/dsh-audit-review/types'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -167,6 +167,74 @@ const DOCX_LAYOUT_OVERRIDES = `
   .audit-docx .docx-wrapper > section.docx { width: auto !important; box-shadow: none !important; margin-bottom: 0 !important; }
   .audit-docx section.docx { overflow: visible !important; }
 `
+
+/**
+ * Render options for this pane: the pane decides sizing, and headers, footers, and page breaks
+ * stay out because the pane scrolls the body alone.
+ */
+const DOCX_RENDER_OPTIONS = {
+  inWrapper: true,
+  ignoreWidth: true,
+  ignoreHeight: true,
+  breakPages: false,
+  renderHeaders: false,
+  renderFooters: false,
+  useBase64URL: true,
+}
+
+/**
+ * Parsed-model nodes this panel walks before rendering. docx-preview types its model `any`, so the
+ * two style maps carrying table borders, the numbering a numbered paragraph addresses, and the
+ * children that hold them are named here.
+ */
+interface DocxModelNode {
+  cssStyle?: Record<string, string>
+  cellStyle?: Record<string, string>
+  /** Numbering definition of a numbered paragraph together with its list level. */
+  numbering?: { id: string | number; level?: number | null }
+  children?: DocxModelNode[]
+}
+
+/** Parsed model whose body tree and numbering levels are post-processed before rendering. */
+interface DocxModel {
+  documentPart: { body: DocxModelNode }
+  numberingPart?: { domNumberings?: { level?: number | null }[] }
+}
+
+/**
+ * docx-preview writes a border with no `w:sz` as the literal width `null`, which CSS rejects and
+ * drops together with the whole border; Word draws its 0.5pt default instead. Restoring that
+ * width keeps the borders of documents that omit `w:sz` visible.
+ * @param node - Parsed node whose style maps and descendants are repaired in place.
+ */
+function restoreBorderWidths(node: DocxModelNode): void {
+  for (const styles of [node.cssStyle, node.cellStyle]) {
+    if (styles === undefined) continue
+    for (const [property, value] of Object.entries(styles)) {
+      // Only border shorthands reach this broken width; `none` borders never carry it.
+      if (value.startsWith('null ')) styles[property] = `0.5pt${value.slice(4)}`
+    }
+  }
+  for (const child of node.children ?? []) restoreBorderWidths(child)
+}
+
+/**
+ * docx-preview reads a list level from `w:ilvl`, which some producers omit. The absent level lands
+ * as `undefined` on paragraphs and `null` on numbering definitions, so the classes it writes
+ * (`docx-num-<id>-undefined`) never match the rules it emits (`docx-num-<id>-null`) and such lists
+ * lose every number. Reading both as level 0 restores those numbers.
+ * @param parsed - Parsed model whose numbering levels and body tree are repaired in place.
+ */
+function restoreNumberingLevels(parsed: DocxModel): void {
+  for (const numbering of parsed.numberingPart?.domNumberings ?? []) {
+    if (numbering.level == null) numbering.level = 0
+  }
+  const visit = (node: DocxModelNode): void => {
+    if (node.numbering !== undefined && node.numbering.level == null) node.numbering.level = 0
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(parsed.documentPart.body)
+}
 
 /** Text nodes that carry document text, in document order. Injected styles never match. */
 function documentTextNodes(container: HTMLElement): Text[] {
@@ -477,20 +545,17 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
     setDocxError('')
     container.replaceChildren()
     readFileBytes(sessionId, documentPath)
-      .then(bytes => renderAsync(bytes, container, undefined, {
-        inWrapper: true,
-        ignoreWidth: true,
-        ignoreHeight: true,
-        breakPages: false,
-        renderHeaders: false,
-        renderFooters: false,
-        useBase64URL: true,
-      }))
-      .then(() => {
-        if (!stale) {
-          setDocxReady(true)
-          setDocxShown(true)
-        }
+      .then(async (bytes) => {
+        const parsed = await parseAsync(bytes, DOCX_RENDER_OPTIONS) as DocxModel
+        restoreBorderWidths(parsed.documentPart.body)
+        restoreNumberingLevels(parsed)
+        return renderDocument(parsed, DOCX_RENDER_OPTIONS)
+      })
+      .then((nodes) => {
+        if (stale) return
+        container.replaceChildren(...nodes)
+        setDocxReady(true)
+        setDocxShown(true)
       })
       .catch((error: unknown) => {
         if (!stale) setDocxError(error instanceof Error ? error.message : String(error))
