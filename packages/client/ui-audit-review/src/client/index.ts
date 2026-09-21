@@ -9,7 +9,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-audit-review/types'
+import type { AuditDecision } from '@deepseek-ai/dsh-audit-review/types'
 import type {} from '@deepseek-ai/dsh-audit-review/remote'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-api-workspace-files/remote'
@@ -33,7 +35,7 @@ const NS = 'audit'
 const AUDIT_REVIEW_ID = '@deepseek-ai/dsh-client-ui-audit-review'
 
 /** Services required. */
-export const inject = ['slots', 'locale', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']
+export const inject = ['slots', 'locale', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles', 'remote.auditReview']
 
 /**
  * Register the audit review cards and sidebar panel.
@@ -71,13 +73,13 @@ export function apply(ctx: ClientContext): void {
     inject: (sessionId: SessionId) => ({
       readFileBytes: async (sid: SessionId, path: string) => {
         const result = await ctx.remote.workspaceFiles.readAll(sid, path)
-        if (!result.ok) throw new Error(result.error)
+        if (!result.ok) throw new Error(result.error.message)
         const binary = atob(result.value.data)
         const bytes = new Uint8Array(binary.length)
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
         return bytes
       },
-      onDecide: async (findingId: string, round: number, decision: 'accept' | 'reject') => {
+      onDecide: async (findingId: string, round: number, decision: AuditDecision) => {
         try {
           await ctx.remote.auditReview.decide({ sessionId, round, findingId, decision })
         } catch (err) {

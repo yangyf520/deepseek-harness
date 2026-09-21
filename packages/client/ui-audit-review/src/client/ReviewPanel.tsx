@@ -1,165 +1,287 @@
 /**
- * Audit review panel: findings on left, Word document on right.
+ * Audit review panel: findings on left, the document on the right.
+ * The original .docx is rendered in place when the session recorded one, so the
+ * layout matches Word; the generated HTML remains the fallback. The HTML path is
+ * derived by convention: anchor.path with its extension replaced by .html
+ * (e.g. work/prd.txt → work/prd.html).
  * @module
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import mammoth from 'mammoth/mammoth.browser.js'
+import { renderAsync } from 'docx-preview'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { AuditState, AuditFinding } from './AuditCard.tsx'
-import { SEVERITY_COLOR, SEVERITY_BG, extractSeverity } from './AuditCard.tsx'
+import type { AuditDecision } from '@deepseek-ai/dsh-audit-review/types'
+import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { AuditState, AuditFinding, Severity } from './AuditCard.tsx'
+import { SEVERITY_COLOR, SEVERITY_BG, parseIssue } from './AuditCard.tsx'
 
 /** Read file bytes from workspace. */
 export type ReadFileBytes = (sessionId: SessionId, path: string) => Promise<Uint8Array<ArrayBuffer>>
 
 /** Review panel props (from slot system). */
-export interface ReviewPanelProps {
-  sessionId: SessionId
-  useProjection: UseProjection
-  readFileBytes: ReadFileBytes
-  t: (key: string) => string
-  onDecide: (findingId: string, round: number, decision: 'accept' | 'reject') => void
-  onApply: (findingId: string, round: number) => void
-}
-
-/** Locate a global text offset as a text node plus local offset. */
-function locateOffset(nodes: readonly Text[], offset: number): { node: Text; offset: number } | undefined {
-  let consumed = 0
-  for (const node of nodes) {
-    const length = node.nodeValue?.length ?? 0
-    if (offset <= consumed + length) return { node, offset: offset - consumed }
-    consumed += length
+export type ReviewPanelProps =
+  PropsRuntime<'sidebar.right.pane.tab'>
+  & PropsLocale<'audit'>
+  & {
+    readFileBytes: ReadFileBytes
+    onDecide: (findingId: string, round: number, decision: AuditDecision) => Promise<void>
+    onApply: (findingId: string, round: number) => Promise<void>
   }
-  return undefined
-}
 
 /** Reset the document container to its original HTML, clearing any highlights. */
 function clearHighlight(container: HTMLElement, docHtml: string): void {
   container.innerHTML = docHtml
 }
 
-/** Normalize whitespace for comparison. */
-function normalizeText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
+/**
+ * Remove the highlights this panel added, restoring the text they wrapped. `dataset` writes the
+ * dashed attribute name, so the selector spells it the same dashed way.
+ */
+function unwrapHighlights(container: HTMLElement): void {
+  for (const mark of Array.from(container.querySelectorAll('mark[data-audit-highlight]'))) {
+    mark.replaceWith(...Array.from(mark.childNodes))
+  }
 }
 
-/** Wrap the first occurrence of `quote` in `container` with a severity-colored mark. */
-function highlightQuote(container: HTMLElement, quote: string, severity: 'high' | 'medium' | 'low'): HTMLElement | null {
+/** Scroll the document so a located element sits at the same height as its card. */
+function alignToCard(scroller: HTMLElement, target: HTMLElement, card: HTMLElement | null): void {
+  if (card === null) {
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    return
+  }
+  const delta = target.getBoundingClientRect().top - card.getBoundingClientRect().top
+  scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: 'smooth' })
+}
+
+/** Replace a finding's quote with its suggested text, keeping the severity background. */
+function replaceQuote(container: HTMLElement, finding: AuditFinding, severity: Severity): HTMLElement | null {
+  const marks = markQuote(container, finding.anchor.quote, severity)
+  const first = marks[0]
+  if (first === undefined) return null
+  applyEdit(marks, finding.anchor.quote, finding.replacement)
+  for (const mark of marks) {
+    mark.dataset.auditReplaced = finding.id
+    delete mark.dataset.auditHighlight
+  }
+  return first
+}
+
+/** Length of the leading run both texts share. */
+function commonPrefix(left: string, right: string): number {
+  let length = 0
+  while (length < left.length && length < right.length && left[length] === right[length]) length++
+  return length
+}
+
+/** Length of the trailing run both texts share, staying clear of the prefix they already share. */
+function commonSuffix(left: string, right: string, prefix: number): number {
+  let length = 0
+  while (length < left.length - prefix && length < right.length - prefix
+    && left[left.length - 1 - length] === right[right.length - 1 - length]) length++
+  return length
+}
+
+/**
+ * Apply the quote-to-replacement edit to the text the marks cover. Only the characters the two
+ * texts do not share change, so a row the document renders as several cells keeps its other cells
+ * and the suggestion shows up where the wording differs.
+ */
+function applyEdit(marks: readonly HTMLElement[], quote: string, replacement: string): void {
+  const prefix = commonPrefix(quote, replacement)
+  const suffix = commonSuffix(quote, replacement, prefix)
+  const before = quote.slice(prefix, quote.length - suffix)
+  const after = replacement.slice(prefix, replacement.length - suffix)
+  let consumed = 0
+  let inserted = false
+  for (const mark of marks) {
+    const text = mark.textContent
+    if (before === '') {
+      const at = prefix - consumed
+      if (!inserted && at >= 0 && at <= text.length) {
+        mark.textContent = text.slice(0, at) + after + text.slice(at)
+        inserted = true
+      }
+    } else {
+      const at = text.indexOf(before)
+      if (at >= 0) mark.textContent = text.slice(0, at) + after + text.slice(at + before.length)
+    }
+    consumed += text.length
+  }
+}
+
+/** Insert every accepted finding's replacement into a freshly rendered document. */
+function applyAccepted(container: HTMLElement, findings: readonly AuditFinding[], decisions: AuditState['decisions']): void {
+  const applied = new Set(Array.from(container.querySelectorAll<HTMLElement>('mark[data-audit-replaced]')).map(mark => mark.dataset.auditReplaced))
+  for (const finding of findings) {
+    if (decisions[finding.id] !== 'accept' || applied.has(finding.id)) continue
+    replaceQuote(container, finding, finding.severity ?? parseIssue(finding.issue).severity)
+  }
+}
+
+/** Outline an applied replacement so the selected card's edit stays visible. */
+function outlineApplied(container: HTMLElement, findingId: string, severity: Severity): HTMLElement | null {
+  for (const mark of Array.from(container.querySelectorAll<HTMLElement>('mark[data-audit-replaced]'))) {
+    if (mark.dataset.auditReplaced !== findingId) continue
+    mark.style.outline = `2px solid ${SEVERITY_COLOR[severity]}`
+    mark.style.outlineOffset = '1px'
+    return mark
+  }
+  return null
+}
+
+/** Drop focus outlines left by an earlier selection. */
+function clearOutlines(container: HTMLElement): void {
+  for (const mark of Array.from(container.querySelectorAll<HTMLElement>('mark[data-audit-replaced]'))) {
+    mark.style.outline = ''
+    mark.style.outlineOffset = ''
+  }
+}
+
+/** File extensions that are binary and cannot be rendered as text. */
+const BINARY_EXTENSIONS = /\.(docx?|xlsx?|pptx?|pdf|png|jpe?g|gif|webp|zip|gz|tar)$/i
+
+/** Basic document styles for HTML preview to resemble a readable document. */
+const DOCUMENT_STYLES = `
+<style>
+  body, div { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a1a1a; }
+  h1 { font-size: 1.8em; font-weight: 700; margin: 0.8em 0 0.4em; }
+  h2 { font-size: 1.4em; font-weight: 600; margin: 0.6em 0 0.3em; }
+  h3 { font-size: 1.2em; font-weight: 600; margin: 0.5em 0 0.2em; }
+  p { margin: 0.4em 0; }
+  table { border-collapse: collapse; width: 100%; margin: 0.6em 0; }
+  th, td { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; font-size: 0.9em; }
+  th { background: #f5f5f5; font-weight: 600; }
+  ul, ol { margin: 0.4em 0; padding-left: 1.5em; }
+  li { margin: 0.2em 0; }
+  mark { padding: 1px 2px; border-radius: 2px; }
+</style>
+`
+
+/**
+ * docx-preview's own page styles center the page in a column flex box and clip its overflow.
+ * In this narrow pane that centering pushes the left edge of wide content out of reach, so the
+ * overrides keep the document left-aligned and let the pane scroll to everything it contains.
+ */
+const DOCX_LAYOUT_OVERRIDES = `
+  .audit-docx .docx-wrapper { background: transparent !important; padding: 0 !important; display: block !important; }
+  .audit-docx .docx-wrapper > section.docx { width: auto !important; box-shadow: none !important; margin-bottom: 0 !important; }
+  .audit-docx section.docx { overflow: visible !important; }
+`
+
+/** Text nodes that carry document text, in document order. Injected styles never match. */
+function documentTextNodes(container: HTMLElement): Text[] {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
   const nodes: Text[] = []
-  let text = ''
   for (let current = walker.nextNode(); current !== null; current = walker.nextNode()) {
+    const parent = (current as Text).parentElement
+    if (parent !== null && (parent.tagName === 'STYLE' || parent.tagName === 'SCRIPT')) continue
     nodes.push(current as Text)
-    text += current.nodeValue ?? ''
   }
-
-  // Try exact match first
-  let start = text.indexOf(quote)
-
-  // If not found, try normalized whitespace match
-  if (start < 0) {
-    const normalizedQuote = normalizeText(quote)
-    const normalizedText = normalizeText(text)
-    const normalizedStart = normalizedText.indexOf(normalizedQuote)
-    if (normalizedStart >= 0) {
-      const textChars = text.split('')
-      const normChars = normalizedText.split('')
-
-      // Build mapping from normalized position to original position.
-      // Normalized spaces map to whitespace in original; non-spaces map to non-whitespace.
-      const normToOrig: number[] = []
-      let ti = 0
-      for (let ni = 0; ni < normChars.length; ni++) {
-        if (normChars[ni] === ' ') {
-          // Skip non-whitespace to find the next whitespace in original text
-          while (ti < textChars.length && /\S/.test(textChars[ti])) {
-            ti++
-          }
-          if (ti < textChars.length) {
-            normToOrig[ni] = ti
-            ti++
-          }
-        } else {
-          // Skip whitespace to find the next non-whitespace in original text
-          while (ti < textChars.length && /\s/.test(textChars[ti])) {
-            ti++
-          }
-          if (ti < textChars.length) {
-            normToOrig[ni] = ti
-            ti++
-          }
-        }
-      }
-
-      if (normToOrig[normalizedStart] !== undefined) {
-        start = normToOrig[normalizedStart]
-        const normalizedEnd = normalizedStart + normalizedQuote.length
-        if (normToOrig[normalizedEnd - 1] !== undefined) {
-          const end = normToOrig[normalizedEnd - 1] + 1
-          const startPos = locateOffset(nodes, start)
-          const endPos = locateOffset(nodes, end)
-          if (startPos !== undefined && endPos !== undefined) {
-            const range = document.createRange()
-            range.setStart(startPos.node, startPos.offset)
-            range.setEnd(endPos.node, endPos.offset)
-            const mark = document.createElement('mark')
-            mark.dataset.auditHighlight = '1'
-            mark.style.background = SEVERITY_BG[severity]
-            mark.style.boxShadow = `inset 0 -2px 0 ${SEVERITY_COLOR[severity]}`
-            try {
-              range.surroundContents(mark)
-            } catch {
-              mark.appendChild(range.extractContents())
-              range.insertNode(mark)
-            }
-            return mark
-          }
-        }
-      }
-    }
-    return null
-  }
-
-  const startPos = locateOffset(nodes, start)
-  const endPos = locateOffset(nodes, start + quote.length)
-  if (startPos === undefined || endPos === undefined) return null
-  const range = document.createRange()
-  range.setStart(startPos.node, startPos.offset)
-  range.setEnd(endPos.node, endPos.offset)
-  const mark = document.createElement('mark')
-  mark.dataset.auditHighlight = '1'
-  mark.style.background = SEVERITY_BG[severity]
-  mark.style.boxShadow = `inset 0 -2px 0 ${SEVERITY_COLOR[severity]}`
-  try {
-    range.surroundContents(mark)
-  } catch {
-    // The quote crosses inline element boundaries: re-wrap the extracted content.
-    mark.appendChild(range.extractContents())
-    range.insertNode(mark)
-  }
-  return mark
+  return nodes
 }
 
-/** Single finding card with accept/reject/apply. */
+/**
+ * Comparable characters paired with the offset each came from. Findings quote the plain-text
+ * extraction of the document, where table cells carry `|` separators and spacing can differ from
+ * the rendered page, so separators are dropped on both sides and quotes are folded to one form.
+ */
+function foldText(text: string): { key: string; index: number[] } {
+  const chars: string[] = []
+  const index: number[] = []
+  for (let offset = 0; offset < text.length; offset++) {
+    const char = text[offset] ?? ''
+    if (/\s/.test(char) || char === '|' || char === '｜') continue
+    chars.push(char === '“' || char === '”' ? '"' : char === '‘' || char === '’' ? "'" : char)
+    index.push(offset)
+  }
+  return { key: chars.join(''), index }
+}
+
+/**
+ * Match `quote` against folded document text. The audit quotes the plain-text extraction, where a
+ * merged table cell repeats on every row it spans and cells carry `|` separators; the rendered
+ * table writes that cell once, so a quote holding those repeats matches only after dropping its
+ * leading segments. The matched range is what the document can highlight.
+ */
+function findQuote(key: string, quote: string): { start: number; end: number } | null {
+  const folded = foldText(quote).key
+  const segments = quote.split(/[|｜]/).map(segment => foldText(segment).key).filter(segment => segment !== '')
+  const candidates = [folded]
+  for (let drop = 1; drop < segments.length; drop++) candidates.push(segments.slice(drop).join(''))
+  for (let keep = segments.length - 1; keep > 0; keep--) candidates.push(segments.slice(0, keep).join(''))
+  const shortest = Math.min(4, folded.length)
+  for (const candidate of candidates) {
+    if (candidate.length < shortest) continue
+    const at = key.indexOf(candidate)
+    if (at >= 0) return { start: at, end: at + candidate.length }
+  }
+  return null
+}
+
+/**
+ * Wrap the rendered occurrence of `quote` in severity-colored marks and return them. One mark per
+ * text run keeps a quote that crosses runs — a table row, for example — fully highlighted, because
+ * every range stays inside a single text node.
+ */
+function markQuote(container: HTMLElement, quote: string, severity: Severity): HTMLElement[] {
+  const nodes = documentTextNodes(container)
+  const haystack = foldText(nodes.map(node => node.nodeValue ?? '').join(''))
+  const match = findQuote(haystack.key, quote)
+  if (match === null) return []
+  const start = haystack.index[match.start] ?? 0
+  const end = (haystack.index[match.end - 1] ?? start) + 1
+
+  const marks: HTMLElement[] = []
+  let consumed = 0
+  for (const node of nodes) {
+    const length = node.nodeValue?.length ?? 0
+    const first = Math.max(start - consumed, 0)
+    const last = Math.min(end - consumed, length)
+    consumed += length
+    if (last <= first) continue
+    const range = document.createRange()
+    range.setStart(node, first)
+    range.setEnd(node, last)
+    const mark = document.createElement('mark')
+    mark.dataset.auditHighlight = '1'
+    mark.style.background = SEVERITY_BG[severity]
+    mark.style.boxShadow = `inset 0 -2px 0 ${SEVERITY_COLOR[severity]}`
+    range.surroundContents(mark)
+    marks.push(mark)
+  }
+  return marks
+}
+
+/** Wrap `quote` and return the mark the document scrolls to. */
+function highlightQuote(container: HTMLElement, quote: string, severity: Severity): HTMLElement | null {
+  return markQuote(container, quote, severity)[0] ?? null
+}
+
+/** Single finding card: accepting writes the suggestion into the document, undoing takes it back. */
 function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
   finding: AuditFinding
   index: number
   round: number
-  t: (key: string) => string
-  onDecide: (findingId: string, round: number, decision: 'accept' | 'reject') => void
-  onApply: (findingId: string, round: number) => void
+  t: TranslateNS<'audit'>
+  onDecide: (findingId: string, round: number, decision: AuditDecision) => Promise<void>
+  onApply: (findingId: string, round: number) => Promise<void>
   decided?: 'accept' | 'reject' | undefined
 }) {
-  const severity = finding.severity ?? extractSeverity(finding.issue)
+  const [confirming, setConfirming] = useState(false)
+  // The file rewrite reads the recorded decisions, so the decision has to land before it runs.
+  const decide = (decision: AuditDecision): void => {
+    void onDecide(finding.id, round, decision).then(() => onApply(finding.id, round))
+  }
+  const parsed = parseIssue(finding.issue)
+  const severity = finding.severity ?? parsed.severity
   const severityLabel = t(`severity.${severity}`)
-  const fallback = (finding.issue.match(/[^。！？!?\n]+/)?.[0] ?? finding.issue).trim()
+  const fallback = (parsed.text.match(/[^。！？!?\n]+/)?.[0] ?? parsed.text).trim()
   const summary = finding.title ?? (fallback.length > 20 ? `${fallback.slice(0, 20)}…` : fallback)
 
   return (
     <div style={{
       padding: '12px',
-      border: `1px solid ${decided === 'accept' ? 'rgb(34, 139, 34)' : decided === 'reject' ? 'rgb(217, 45, 32)' : 'rgb(220, 225, 235)'}`,
+      border: `1px solid ${decided === 'accept' ? 'rgb(34, 139, 34)' : 'rgb(220, 225, 235)'}`,
       borderRadius: '12px',
       background: 'rgb(255, 255, 255)',
       marginBottom: '8px',
@@ -190,7 +312,7 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
       <div style={{ fontSize: '13px', fontWeight: 400, marginBottom: '8px', lineHeight: 1.4, color: 'rgb(30, 35, 45)',
         background: 'rgb(255, 255, 255)', borderRadius: '6px', padding: '8px 10px',
       }}>
-        {finding.issue}
+        {parsed.text}
       </div>
 
       {/* Suggestion */}
@@ -199,33 +321,62 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
         background: 'rgb(255, 255, 255)', border: '1px solid rgb(220, 225, 235)',
         borderRadius: '6px', padding: '8px 10px',
       }}>
-        <strong style={{ color: 'rgb(23, 92, 211)' }}>{t('finding.suggestion')}:</strong> {finding.replacement || '无建议'}
+        <strong style={{ color: 'rgb(23, 92, 211)' }}>{t('finding.suggestion')}:</strong> {finding.replacement || t('finding.delete')}
       </div>
 
       {/* Action buttons */}
       {!decided && (
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-          <button type="button" onClick={() => onDecide(finding.id, round, 'accept')} style={{
-            padding: '4px 32px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
-            background: 'rgb(34, 139, 34)', color: 'white', border: 'none', borderRadius: '6px',
-          }}>{t('action.accept')}</button>
-          <button type="button" onClick={() => onDecide(finding.id, round, 'reject')} style={{
-            padding: '4px 32px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
-            background: 'white', color: 'rgb(217, 45, 32)', border: '1px solid rgb(217, 45, 32)', borderRadius: '6px',
-          }}>{t('action.reject')}</button>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start' }}>
+          <button type="button" onClick={() => decide('accept')} style={{
+            padding: '4px 16px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            background: 'rgb(34, 139, 34)', color: 'white', border: 'none', borderRadius: '999px',
+            cornerShape: 'round',
+          } as CSSProperties}>{t('action.accept')}</button>
+          <button type="button" onClick={() => setConfirming(true)} style={{
+            padding: '4px 16px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            background: 'white', color: 'rgb(217, 45, 32)', border: '1px solid rgb(217, 45, 32)', borderRadius: '999px',
+            cornerShape: 'round',
+          } as CSSProperties}>{t('action.reject')}</button>
         </div>
       )}
-      {decided && (
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <span style={{ flex: 1, fontSize: '12px', color: decided === 'accept' ? 'rgb(34, 139, 34)' : 'rgb(217, 45, 32)', fontWeight: 600 }}>
-            {decided === 'accept' ? t('status.accepted') : t('status.rejected')}
-          </span>
-          {decided === 'accept' && (
-            <button type="button" onClick={() => onApply(finding.id, round)} style={{
-              padding: '4px 12px', fontSize: '12px', cursor: 'pointer',
-              background: 'rgb(23, 92, 211)', color: 'white', border: 'none', borderRadius: '6px',
-            }}>{t('action.apply')}</button>
-          )}
+      {decided === 'accept' && (
+        <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+          <button type="button" onClick={() => decide('undo')} style={{
+            padding: '4px 16px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            background: 'white', color: 'rgb(34, 139, 34)', border: '1px solid rgb(34, 139, 34)', borderRadius: '999px',
+            cornerShape: 'round',
+          } as CSSProperties}>{t('action.undo')}</button>
+        </div>
+      )}
+
+      {/* Confirmation before the card closes on a rejection */}
+      {confirming && (
+        <div onClick={() => setConfirming(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgb(16 24 40 / 32%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div onClick={event => event.stopPropagation()} style={{
+            background: 'white', borderRadius: '10px', padding: '16px', width: '260px',
+            boxShadow: '0 8px 24px rgb(16 24 40 / 18%)',
+          }}>
+            <div style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: '14px', color: 'rgb(30, 35, 45)' }}>
+              {t('confirm.reject')}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setConfirming(false)} style={{
+                padding: '4px 12px', fontSize: '12px', cursor: 'pointer',
+                background: 'white', color: 'rgb(102, 112, 133)', border: '1px solid rgb(220, 225, 235)', borderRadius: '6px',
+              }}>{t('action.cancel')}</button>
+              <button type="button" autoFocus onClick={() => {
+                setConfirming(false)
+                onDecide(finding.id, round, 'reject')
+              }} style={{
+                padding: '4px 12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+                background: 'rgb(217, 45, 32)', color: 'white', border: 'none', borderRadius: '6px',
+              }}>{t('action.reject')}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -239,31 +390,167 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
   const [docError, setDocError] = useState<string>('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectionKey, setSelectionKey] = useState(0)
-  const docRef = useRef<HTMLDivElement | null>(null)
+  const [view, setView] = useState<'original' | 'text' | null>(null)
+  const [docxReady, setDocxReady] = useState(false)
+  // Set once the original renders, so re-rendering for a replacement shows no loading gap.
+  const [docxShown, setDocxShown] = useState(false)
+  const [docxError, setDocxError] = useState('')
+  // Set when the selected quote has no counterpart in the rendered document, so the
+  // panel can say why nothing is highlighted instead of highlighting nothing silently.
+  const [unlocated, setUnlocated] = useState(false)
+  const docTextRef = useRef<HTMLDivElement | null>(null)
+  const docxRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Card whose height the located document text aligns to on selection.
+  const cardRef = useRef<HTMLElement | null>(null)
+
+  const documentPath = state?.documentPath ?? null
+  const hasOriginal = documentPath !== null && /\.docx$/i.test(documentPath)
+  const activeView = view ?? (hasOriginal ? 'original' : 'text')
+
+  // Findings whose replacements the document must show. A change re-renders the original,
+  // because a replaced quote no longer exists in the text it was located in.
+  const acceptedKey = Object.entries(state?.decisions ?? {})
+    .filter(([, decision]) => decision === 'accept')
+    .map(([id]) => id)
+    .sort()
+    .join(',')
 
   const selectedFinding = selectedId !== null ? state?.findings.find(f => f.id === selectedId) ?? null : null
 
-  // Load Word document
-  useEffect(() => {
-    if (!state || !state.documentPath || !readFileBytes) return
-    const docPath = state.documentPath
+  // Derive HTML preview path from anchor.path by convention:
+  // work/prd.txt → work/prd.html. The document path recorded by the audit event
+  // is the original binary upload, which has no HTML sibling, so anchors win.
+  const anchorPath = selectedFinding?.anchor.path ?? state?.findings[0]?.anchor.path ?? state?.documentPath ?? null
+  const htmlPath = anchorPath?.replace(/\.[^.]+$/, '.html') ?? null
 
-    readFileBytes(sessionId, docPath)
-      .then(bytes => mammoth.convertToHtml({ arrayBuffer: bytes.buffer }))
-      .then(result => setDocHtml(result.value))
-      .catch(err => setDocError(`文档加载失败: ${err.message}`))
-  }, [sessionId, state, readFileBytes])
-
-  // Highlight the selected finding's quote in the document and scroll to it
+  // Load HTML preview or fall back to plain text
   useEffect(() => {
-    const container = docRef.current
-    if (container === null) return
+    if (!state || !anchorPath || !readFileBytes || activeView !== 'text') return
+    setDocHtml('')
+    setDocError('')
+
+    // Try loading the HTML version first
+    if (htmlPath && htmlPath !== anchorPath) {
+      readFileBytes(sessionId, htmlPath)
+        .then((bytes) => {
+          const html = new TextDecoder().decode(bytes)
+          setDocHtml(DOCUMENT_STYLES + html)
+        })
+        .catch(() => {
+          // HTML not available, fall back to plain text if anchor is a text file
+          if (BINARY_EXTENSIONS.test(anchorPath)) {
+            setDocError('HTML 预览文件不存在。请先运行审计流程生成 HTML 文件。')
+            return
+          }
+          readFileBytes(sessionId, anchorPath)
+            .then((bytes) => {
+              const text = new TextDecoder().decode(bytes)
+              const escaped = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>')
+              setDocHtml(`<pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">${escaped}</pre>`)
+            })
+            .catch(err => setDocError(`文档加载失败: ${err.message}`))
+        })
+    } else {
+      // No HTML derivation possible, render anchor.path directly
+      if (BINARY_EXTENSIONS.test(anchorPath)) {
+        setDocError('无法预览二进制文件。请先运行审计流程生成 HTML 文件。')
+        return
+      }
+      const isHtml = anchorPath?.match(/\.html?$/i)
+      readFileBytes(sessionId, anchorPath)
+        .then((bytes) => {
+          if (isHtml) {
+            setDocHtml(DOCUMENT_STYLES + new TextDecoder().decode(bytes))
+          } else {
+            const text = new TextDecoder().decode(bytes)
+            const escaped = text
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/\n/g, '<br>')
+            setDocHtml(`<pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">${escaped}</pre>`)
+          }
+        })
+        .catch(err => setDocError(`文档加载失败: ${err.message}`))
+    }
+  }, [sessionId, state, anchorPath, htmlPath, readFileBytes, activeView])
+
+  // Render the original .docx so the panel shows the Word layout. The generated HTML
+  // stays the fallback for sessions that recorded no .docx.
+  useEffect(() => {
+    const container = docxRef.current
+    if (activeView !== 'original' || !hasOriginal || container === null || documentPath === null) return
+    let stale = false
+    setDocxReady(false)
+    setDocxError('')
+    container.replaceChildren()
+    readFileBytes(sessionId, documentPath)
+      .then(bytes => renderAsync(bytes, container, undefined, {
+        inWrapper: true,
+        ignoreWidth: true,
+        ignoreHeight: true,
+        breakPages: false,
+        renderHeaders: false,
+        renderFooters: false,
+        useBase64URL: true,
+      }))
+      .then(() => {
+        if (!stale) {
+          setDocxReady(true)
+          setDocxShown(true)
+        }
+      })
+      .catch((error: unknown) => {
+        if (!stale) setDocxError(error instanceof Error ? error.message : String(error))
+      })
+    return () => {
+      stale = true
+    }
+  }, [sessionId, activeView, hasOriginal, documentPath, readFileBytes, acceptedKey])
+
+  // A different document starts without a rendered copy, so the loading line may show again.
+  useEffect(() => {
+    setDocxShown(false)
+  }, [documentPath])
+
+  // Show accepted replacements and the selected quote in the document, then align the
+  // located text with the card that asked for it.
+  useEffect(() => {
+    const scroller = scrollRef.current
+    const show = (container: HTMLElement): void => {
+      unwrapHighlights(container)
+      clearOutlines(container)
+      applyAccepted(container, state?.findings ?? [], state?.decisions ?? {})
+      if (selectedFinding === null) {
+        setUnlocated(false)
+        return
+      }
+      const severity = selectedFinding.severity ?? parseIssue(selectedFinding.issue).severity
+      const target = state?.decisions[selectedFinding.id] === 'accept'
+        ? outlineApplied(container, selectedFinding.id, severity)
+        : highlightQuote(container, selectedFinding.anchor.quote, severity)
+      setUnlocated(target === null)
+      if (target !== null && scroller !== null) alignToCard(scroller, target, cardRef.current)
+    }
+    if (activeView === 'original') {
+      const original = docxRef.current
+      if (original === null || !docxReady) return
+      show(original)
+      return
+    }
+    const container = docTextRef.current
+    if (container === null || docHtml === '') {
+      setUnlocated(false)
+      return
+    }
     clearHighlight(container, docHtml)
-    if (selectedFinding === null || docHtml === '') return
-    const severity = selectedFinding.severity ?? extractSeverity(selectedFinding.issue)
-    const mark = highlightQuote(container, selectedFinding.anchor.quote, severity)
-    mark?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [selectionKey, docHtml])
+    show(container)
+  }, [selectionKey, docHtml, activeView, docxReady, state])
 
   if (!state || state.round === 0 || state.findings.length === 0) {
     return <div style={{ padding: '20px', color: 'rgb(102, 112, 133)' }}>暂无审计数据</div>
@@ -283,31 +570,63 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
         <div style={{ fontSize: '12px', color: 'rgb(102, 112, 133)', marginBottom: '16px' }}>
           {accepted} {t('status.accepted')} · {rejected} {t('status.rejected')} · {findings.length - accepted - rejected} {t('overview.findings')}
         </div>
-        {/* Increment selectionKey on each click to force the highlight effect to re-run */}
-        {findings.map((finding, index) => (
-          <div key={finding.id} onClick={() => { setSelectedId(finding.id); setSelectionKey(k => k + 1) }} style={{
-            cursor: 'pointer',
-            outline: selectedId === finding.id ? '2px solid rgb(23, 92, 211)' : 'none',
-            borderRadius: '12px',
-            marginBottom: '12px',
-          }}>
-            <FindingCard
-              finding={finding}
-              index={index}
-              round={state.round}
-              t={t}
-              onDecide={onDecide}
-              onApply={onApply}
-              decided={state.decisions[finding.id]}
-            />
-          </div>
-        ))}
+        {/* Increment selectionKey on each click to force the highlight effect to re-run. A rejected
+            finding leaves the list but keeps the number it was audited under. */}
+        {findings.map((finding, index) => ({ finding, index }))
+          .filter(({ finding }) => state.decisions[finding.id] !== 'reject')
+          .map(({ finding, index }) => (
+            <div key={finding.id} onClick={(event) => {
+              cardRef.current = event.currentTarget
+              setSelectedId(finding.id)
+              setSelectionKey(k => k + 1)
+            }} style={{
+              cursor: 'pointer',
+              outline: selectedId === finding.id ? '2px solid rgb(23, 92, 211)' : 'none',
+              borderRadius: '12px',
+              marginBottom: '12px',
+            }}>
+              <FindingCard
+                finding={finding}
+                index={index}
+                round={state.round}
+                t={t}
+                onDecide={onDecide}
+                onApply={onApply}
+                decided={state.decisions[finding.id]}
+              />
+            </div>
+          ))}
       </div>
 
-      {/* Right: Word document */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
-        {docHtml ? (
-          <div ref={docRef} dangerouslySetInnerHTML={{ __html: docHtml }} />
+      {/* Right: document, rendered from the original .docx when the session has one */}
+      <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+        {hasOriginal && (
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+            {(['original', 'text'] as const).map(mode => (
+              <button key={mode} type="button" onClick={() => setView(mode)} style={{
+                padding: '3px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '6px',
+                border: `1px solid ${activeView === mode ? 'rgb(23, 92, 211)' : 'rgb(220, 225, 235)'}`,
+                background: activeView === mode ? 'rgb(23, 92, 211)' : 'white',
+                color: activeView === mode ? 'white' : 'rgb(70, 80, 100)',
+              }}>{t(`view.${mode}`)}</button>
+            ))}
+          </div>
+        )}
+        {unlocated && (
+          <div style={{ fontSize: '12px', color: 'rgb(178, 106, 0)', marginBottom: '8px' }}>{t('preview.unlocated')}</div>
+        )}
+        {activeView === 'original' ? (
+          docxError !== '' ? (
+            <div style={{ color: 'rgb(217, 45, 32)', padding: '20px' }}>{`原文渲染失败: ${docxError}`}</div>
+          ) : (
+            <>
+              {!docxShown && <div style={{ color: 'rgb(102, 112, 133)', padding: '20px' }}>加载中...</div>}
+              <style>{DOCX_LAYOUT_OVERRIDES}</style>
+              <div ref={docxRef} className="audit-docx" />
+            </>
+          )
+        ) : docHtml ? (
+          <div ref={docTextRef} dangerouslySetInnerHTML={{ __html: docHtml }} />
         ) : docError ? (
           <div style={{ color: 'rgb(217, 45, 32)', padding: '20px' }}>{docError}</div>
         ) : (

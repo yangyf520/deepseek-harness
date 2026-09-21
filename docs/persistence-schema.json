@@ -3753,6 +3753,242 @@
       }
     },
     {
+      "key": "event:audit/decide",
+      "kind": "event",
+      "event": "audit/decide",
+      "surface": false,
+      "digest": "cd792efc0fcadfdd03c1e434d6359957c764b6a27d643b2636f53a469e4b44c3",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 9,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "decision",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "findingId",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "round",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "accept"
+          },
+          {
+            "kind": "literal",
+            "value": "reject"
+          },
+          {
+            "kind": "literal",
+            "value": "undo"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "audit/decide"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:audit/write",
+      "kind": "event",
+      "event": "audit/write",
+      "surface": false,
+      "digest": "0d82019c6ea6ddaadbe7536cfd8f6e16e664c72d291a449250583e54c15099ab",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 8,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "documentPath",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "findings",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "round",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "anchor",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "issue",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "replacement",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "title",
+                "type": 2,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "line",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "path",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "quote",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "audit/write"
+          }
+        ]
+      }
+    },
+    {
       "key": "event:command/done",
       "kind": "event",
       "event": "command/done",
@@ -16258,6 +16494,142 @@
       ]
     },
     {
+      "digest": "0d82019c6ea6ddaadbe7536cfd8f6e16e664c72d291a449250583e54c15099ab",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 7,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 8,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "documentPath",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "findings",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "round",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "anchor",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "issue",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "replacement",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "title",
+                "type": 2,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "line",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "path",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "quote",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "audit/write"
+          }
+        ]
+      },
+      "names": [
+        "event:audit/write"
+      ],
+      "sources": []
+    },
+    {
       "digest": "0ddab4577db37a3e0d9e3a91761735c8ef6f5629d526ab8ecaeeea19c097c8f8",
       "schema": {
         "root": 0,
@@ -18893,6 +19265,105 @@
       },
       "names": [],
       "sources": []
+    },
+    {
+      "digest": "1cc2635f9c2b69ea3bf0678e6cf734e1b7f4a84bf59df81e5d9f73aa2ae75183",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "documentPath",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "findings",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "round",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 3
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "anchor",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "issue",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "replacement",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "title",
+                "type": 1,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "line",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "path",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "quote",
+                "type": 1,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          }
+        ]
+      },
+      "names": [
+        "packages/audit/audit-review/src/types.ts#AuditWrite"
+      ],
+      "sources": [
+        "packages/audit/audit-review/src/types.ts:26"
+      ]
     },
     {
       "digest": "1cde1bedde79c5e8a56aee9c05c8e0a579cf5bc611deb85b93fa331a16ca978f",
@@ -29724,6 +30195,20 @@
       "sources": []
     },
     {
+      "digest": "4540ad0a33fa1fcaa4eb9217791e5bf59b8e512dc7e04fd937ac7b70c19fae27",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "reject"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "45f2a07ea94573123b6ae14db787a40062dec3834f36d8be92c523d40ba28448",
       "schema": {
         "root": 0,
@@ -34534,6 +35019,80 @@
       ]
     },
     {
+      "digest": "58698331eef7101cc0ea6f0c09424d13e12198bc147c6834703988189d1b6b80",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "anchor",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "issue",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "replacement",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "title",
+                "type": 3,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "line",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "path",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "quote",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          }
+        ]
+      },
+      "names": [
+        "packages/audit/audit-review/src/types.ts#AuditFinding"
+      ],
+      "sources": [
+        "packages/audit/audit-review/src/types.ts:17"
+      ]
+    },
+    {
       "digest": "587bb11da730e06aa52b62c087d217d6f8f22459b25f31cb9e1e1baf17944e5e",
       "schema": {
         "root": 0,
@@ -35076,9 +35635,9 @@
         ]
       },
       "names": [
-        "SessionEventEnvelope[39].sourceEventSeqs",
-        "SessionEventEnvelope[52].sourceEventSeqs",
-        "SessionEventEnvelope[55].sourceEventSeqs",
+        "SessionEventEnvelope[41].sourceEventSeqs",
+        "SessionEventEnvelope[54].sourceEventSeqs",
+        "SessionEventEnvelope[57].sourceEventSeqs",
         "event:assistant/attempt.data.stream[0][0].dt",
         "event:assistant/attempt.data.stream[0][1].dt",
         "event:assistant/attempt.data.stream[0][2].dt",
@@ -35504,6 +36063,49 @@
       ],
       "sources": [
         "packages/subagent/subagent/src/descriptor.ts:61"
+      ]
+    },
+    {
+      "digest": "60b46057fe3abef4585ab680f4fd1783aef4191626863078652f9e0e2d6d3269",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "line",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "path",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "quote",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          }
+        ]
+      },
+      "names": [
+        "packages/audit/audit-review/src/types.ts#AuditAnchor"
+      ],
+      "sources": [
+        "packages/audit/audit-review/src/types.ts:10"
       ]
     },
     {
@@ -38008,6 +38610,20 @@
       "sources": []
     },
     {
+      "digest": "6a04bdf050e7deea709f730b0b6b7778e3b4b3efde881b348985ee8d6cffc3a2",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "accept"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "6a4f72e2e179e17b922f2a9392c0e1c8f8c707f32494372454850a3eb184a6e7",
       "schema": {
         "root": 0,
@@ -38701,6 +39317,20 @@
       "sources": [
         "packages/llm/llm/src/assistant-stream.ts:28"
       ]
+    },
+    {
+      "digest": "71e422ec47510060bed77ef4e4bda655335b3e16df95f82f2ea4036b15aa068d",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "undo"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
     },
     {
       "digest": "72ec79127a9c0d0241b1106a74cc2b24c81ce467170f1c3c93f7b71a9496d227",
@@ -41172,6 +41802,82 @@
       "sources": [
         "packages/goal/goal/src/types.ts:52"
       ]
+    },
+    {
+      "digest": "85500cd6aa8c44b6de67d64da8203cd2f832511deae2c55f9ccf1ec058b9b9e1",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "array",
+            "element": 1
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "anchor",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "issue",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "replacement",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "title",
+                "type": 4,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "line",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "path",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "quote",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          }
+        ]
+      },
+      "names": [
+        "event:audit/write.data.findings"
+      ],
+      "sources": []
     },
     {
       "digest": "85e1bd563d6c80c1f377f99f91103fec4e315148a7330f3b3dae7c2d04e33b01",
@@ -44464,6 +45170,40 @@
       ]
     },
     {
+      "digest": "997d21dc4c229aa688ae466ff5dc68983796dcbeb5d3ca97a1b79c7eacfce24d",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "union",
+            "types": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "accept"
+          },
+          {
+            "kind": "literal",
+            "value": "reject"
+          },
+          {
+            "kind": "literal",
+            "value": "undo"
+          }
+        ]
+      },
+      "names": [
+        "packages/audit/audit-review/src/types.ts#AuditDecision"
+      ],
+      "sources": [
+        "packages/audit/audit-review/src/types.ts:33"
+      ]
+    },
+    {
       "digest": "998f22585a5d73ec005365e203f07fc3b3a029e82323fdda3fd7f13b0a9639d0",
       "schema": {
         "root": 0,
@@ -44559,9 +45299,9 @@
         ]
       },
       "names": [
-        "SessionEventEnvelope[39]",
-        "SessionEventEnvelope[52]",
-        "SessionEventEnvelope[55]"
+        "SessionEventEnvelope[41]",
+        "SessionEventEnvelope[54]",
+        "SessionEventEnvelope[57]"
       ],
       "sources": []
     },
@@ -48974,6 +49714,20 @@
       "names": [
         "event:agent/inbox/spliced.data.inserted[0].source[17].entries"
       ],
+      "sources": []
+    },
+    {
+      "digest": "ac894e83d74aa6edb0fd0a6e21fa85587bce36f159c4088091c88adbca4da5a4",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "audit/decide"
+          }
+        ]
+      },
+      "names": [],
       "sources": []
     },
     {
@@ -55063,6 +55817,20 @@
       ]
     },
     {
+      "digest": "cb29c15b01a0677bfdf34b6fe6fb35f3e5e5e9004c0275a85c4f61156becaa98",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "audit/write"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "cbca49bde16b656d5b8fbe4a8a507769f7b594c6287782b809c03814941bc5e3",
       "schema": {
         "root": 0,
@@ -55088,6 +55856,106 @@
         ]
       },
       "names": [],
+      "sources": []
+    },
+    {
+      "digest": "cd792efc0fcadfdd03c1e434d6359957c764b6a27d643b2636f53a469e4b44c3",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 9,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "decision",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "findingId",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "round",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "accept"
+          },
+          {
+            "kind": "literal",
+            "value": "reject"
+          },
+          {
+            "kind": "literal",
+            "value": "undo"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "audit/decide"
+          }
+        ]
+      },
+      "names": [
+        "event:audit/decide"
+      ],
       "sources": []
     },
     {
@@ -55809,6 +56677,69 @@
       ],
       "sources": [
         "packages/core/session/src/types.ts:285"
+      ]
+    },
+    {
+      "digest": "d45a54e5933dcbf58d51e9ad48e401d0b86fd76ee94c4a44436b097fe6c761f5",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "decision",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "findingId",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "round",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "accept"
+          },
+          {
+            "kind": "literal",
+            "value": "reject"
+          },
+          {
+            "kind": "literal",
+            "value": "undo"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          }
+        ]
+      },
+      "names": [
+        "packages/audit/audit-review/src/types.ts#AuditDecide"
+      ],
+      "sources": [
+        "packages/audit/audit-review/src/types.ts:36"
       ]
     },
     {
@@ -58587,9 +59518,9 @@
         "SessionEventEnvelope[36]",
         "SessionEventEnvelope[37]",
         "SessionEventEnvelope[38]",
+        "SessionEventEnvelope[39]",
         "SessionEventEnvelope[3]",
         "SessionEventEnvelope[40]",
-        "SessionEventEnvelope[41]",
         "SessionEventEnvelope[42]",
         "SessionEventEnvelope[43]",
         "SessionEventEnvelope[44]",
@@ -58601,10 +59532,12 @@
         "SessionEventEnvelope[4]",
         "SessionEventEnvelope[50]",
         "SessionEventEnvelope[51]",
+        "SessionEventEnvelope[52]",
         "SessionEventEnvelope[53]",
-        "SessionEventEnvelope[54]",
+        "SessionEventEnvelope[55]",
         "SessionEventEnvelope[56]",
-        "SessionEventEnvelope[57]",
+        "SessionEventEnvelope[58]",
+        "SessionEventEnvelope[59]",
         "SessionEventEnvelope[5]",
         "SessionEventEnvelope[7]",
         "SessionEventEnvelope[8]",

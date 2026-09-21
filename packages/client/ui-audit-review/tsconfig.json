@@ -6,6 +6,20 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../../../vendor/cordis" }
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../audit/audit-review" },
+    { "path": "../../core/session" },
+    { "path": "../../typert/protocol" },
+    { "path": "../../util/workspace-path" },
+    { "path": "../../api/session-controller/tsconfig.client.json" },
+    { "path": "../../api/workspace-files/tsconfig.client.json" },
+    { "path": "../locale" },
+    { "path": "../ui-chat" },
+    { "path": "../ui-conversation" },
+    { "path": "../ui-renderer" },
+    { "path": "../ui-session" },
+    { "path": "../ui-sidebar-right" },
+    { "path": "../ui-slots" }
   ]
 }

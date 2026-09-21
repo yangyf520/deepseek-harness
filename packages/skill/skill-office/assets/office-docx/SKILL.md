@@ -44,3 +44,17 @@ If `render_document` is available and visual inspection is useful, call it on th
 Use the available rendering tool for this check. Review `warnings` such as missing fonts. LibreOffice pagination can differ from Microsoft Word. If rendering is unavailable or fails, preserve the usable document and report the inspection limit; do not require the user to install a renderer.
 
 Call `present({"files":[{"path":"report.docx"}]})` with the actual final DOCX path. It exposes the current source file without copying or preserving its bytes, so keep that file in place and do not present temporary QA reports unless requested. If `present` is unavailable, provide the final workspace path using the session's supported file delivery method.
+
+## Convert to HTML and text for audit/review
+
+When auditing or reviewing a document, convert it to HTML (for formatted preview) and plain text (for quoting):
+
+```text
+<python> <skill-directory>/../scripts/docx_to_html.py <document.docx> <work/document>
+```
+
+This generates:
+- `<work/document>.html` — HTML rendering with paragraphs, tables, and headings
+- `<work/document>.txt` — Plain text extraction (innerText equivalent)
+
+The HTML file and text file MUST have the same base name. The review panel renders the HTML file for formatted preview with highlight linkage. When calling `audit_write`, set `anchor.path` to the text file (`.txt`) and ensure `anchor.quote` matches the text file content exactly.

@@ -1,26 +1,7 @@
 /** Locale dictionaries for audit review UI. */
 
-/** Dictionary shape. */
-export interface AuditKey {
-  'overview.title': string
-  'overview.findings': string
-  'overview.more': string
-  'overview.openReview': string
-  'overview.download': string
-  'severity.high': string
-  'severity.medium': string
-  'severity.low': string
-  'finding.original': string
-  'finding.suggestion': string
-  'action.accept': string
-  'action.reject': string
-  'action.apply': string
-  'status.accepted': string
-  'status.rejected': string
-}
-
-/** Chinese dictionary. */
-export const zh: AuditKey = {
+/** Chinese dictionary (the key-set source of truth). */
+export const zh = {
   'overview.title': '文档审计',
   'overview.findings': '条发现',
   'overview.more': '更多发现',
@@ -31,15 +12,24 @@ export const zh: AuditKey = {
   'severity.low': '低风险',
   'finding.original': '原文',
   'finding.suggestion': '建议替换',
+  'finding.delete': '删除该行',
+  'preview.unlocated': '预览中未定位到该引文',
+  'view.original': '原文版式',
+  'view.text': '审计文本',
   'action.accept': '接受',
   'action.reject': '拒绝',
-  'action.apply': '应用',
+  'action.undo': '撤销',
+  'action.cancel': '取消',
+  'confirm.reject': '确认拒绝这条发现？',
   'status.accepted': '已接受',
   'status.rejected': '已拒绝',
-}
+} satisfies Record<string, string>
 
-/** English dictionary. */
-export const en: AuditKey = {
+/** The audit namespace key union. */
+export type AuditKey = keyof typeof zh
+
+/** English dictionary, checked complete against the zh key set. */
+export const en = {
   'overview.title': 'Document Audit',
   'overview.findings': 'findings',
   'overview.more': 'more findings',
@@ -50,9 +40,15 @@ export const en: AuditKey = {
   'severity.low': 'Low',
   'finding.original': 'Original',
   'finding.suggestion': 'Suggested replacement',
+  'finding.delete': 'Delete this line',
+  'preview.unlocated': 'The quote was not located in this preview',
+  'view.original': 'Original layout',
+  'view.text': 'Audit text',
   'action.accept': 'Accept',
   'action.reject': 'Reject',
-  'action.apply': 'Apply',
+  'action.undo': 'Undo',
+  'action.cancel': 'Cancel',
+  'confirm.reject': 'Reject this finding?',
   'status.accepted': 'Accepted',
   'status.rejected': 'Rejected',
-}
+} satisfies Record<AuditKey, string>

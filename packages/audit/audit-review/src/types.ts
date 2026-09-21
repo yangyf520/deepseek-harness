@@ -29,16 +29,21 @@ export interface AuditWrite {
   readonly findings: readonly AuditFinding[]
 }
 
+/** A user decision on one finding; `undo` clears an earlier decision. */
+export type AuditDecision = 'accept' | 'reject' | 'undo'
+
 /** Session event: the user decided on one finding. */
 export interface AuditDecide {
   readonly round: number
   readonly findingId: string
-  readonly decision: 'accept' | 'reject'
+  readonly decision: AuditDecision
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
+    /** One audit round's findings for one document; a later round supersedes it on replay. */
     'audit/write': AuditWrite
+    /** One user decision on one finding of the named round; `undo` clears that finding's earlier decision. */
     'audit/decide': AuditDecide
   }
 }
@@ -65,7 +70,7 @@ export interface AuditDecideRequest {
   readonly sessionId: SessionId
   readonly round: number
   readonly findingId: string
-  readonly decision: 'accept' | 'reject'
+  readonly decision: AuditDecision
 }
 
 /** Result of a decide operation. */
@@ -73,14 +78,17 @@ export type AuditDecideResult =
   | { ok: true }
   | { ok: false; error: { code: string; message: string } }
 
-/** Request to apply one accepted finding's replacement. */
+/**
+ * Request to rewrite an audited file so it holds the round's accepted findings. `findingId` names
+ * the finding whose decision just changed, and thereby the file to rewrite.
+ */
 export interface AuditApplyRequest {
   readonly sessionId: SessionId
   readonly round: number
   readonly findingId: string
 }
 
-/** Result of an apply operation. */
+/** Result of rendering a file from the round's accepted findings. */
 export type AuditApplyResult =
   | { ok: true }
   | { ok: false; error: { code: string; message: string } }

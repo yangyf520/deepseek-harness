@@ -4,8 +4,7 @@
  */
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 
 /** Severity level for color coding. */
 export type Severity = 'high' | 'medium' | 'low'
@@ -24,10 +23,39 @@ export const SEVERITY_BG: Record<Severity, string> = {
   low: '#d1fae5',
 }
 
-/** Extract severity from issue text. */
-export function extractSeverity(issue: string): Severity {
-  if (issue.includes('高') || issue.toLowerCase().includes('high')) return 'high'
-  if (issue.includes('中') || issue.toLowerCase().includes('medium')) return 'medium'
+/** The level prefix `audit_write` requires at the start of every issue. */
+const LEVEL_PREFIX = /^\s*[【[]\s*(高|中|低)风险\s*[】\]]\s*/
+
+/** A finding's issue split into its declared severity and the prose shown to users. */
+export interface ParsedIssue {
+  severity: Severity
+  /** Issue prose with the level prefix removed. */
+  text: string
+}
+
+/**
+ * Read a finding's severity from the level prefix the audit tool requires and strip that
+ * prefix from the prose, so the level never depends on incidental characters.
+ * @param issue - Raw issue text recorded by `audit_write`.
+ * @returns the declared severity and the display prose.
+ */
+export function parseIssue(issue: string): ParsedIssue {
+  const match = LEVEL_PREFIX.exec(issue)
+  if (match === null) return { severity: inferSeverity(issue), text: issue }
+  const text = issue.slice(match[0].length)
+  if (match[1] === '高') return { severity: 'high', text }
+  if (match[1] === '中') return { severity: 'medium', text }
+  return { severity: 'low', text }
+}
+
+/**
+ * Keyword fallback for issues recorded before the level prefix was required.
+ * @param issue - Raw issue text.
+ * @returns the inferred severity.
+ */
+function inferSeverity(issue: string): Severity {
+  if (/安全|泄露|越权|丢失|高风险|严重/.test(issue)) return 'high'
+  if (/矛盾|不一致|冲突|缺失|为空|未定义|未提及|不衔接|遗漏/.test(issue)) return 'medium'
   return 'low'
 }
 
@@ -45,7 +73,7 @@ export interface AuditFinding {
 export interface AuditState {
   round: number
   documentPath: string
-  findings: AuditFinding[]
+  findings: readonly AuditFinding[]
   decisions: Record<string, 'accept' | 'reject'>
 }
 
@@ -55,15 +83,16 @@ interface AuditOverviewProps {
   state: AuditState
   onOpenReview: () => void
   onDownload: () => void
-  t: (key: string, params?: Record<string, unknown>) => string
+  t: TranslateNS<'audit'>
 }
 
 /** Overview card showing summary and finding list. */
 export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditOverviewProps) {
   const findings = state.findings
-  const highCount = findings.filter(f => extractSeverity(f.issue) === 'high').length
-  const mediumCount = findings.filter(f => extractSeverity(f.issue) === 'medium').length
-  const lowCount = findings.filter(f => extractSeverity(f.issue) === 'low').length
+  const severities = findings.map(f => f.severity ?? parseIssue(f.issue).severity)
+  const highCount = severities.filter(s => s === 'high').length
+  const mediumCount = severities.filter(s => s === 'medium').length
+  const lowCount = severities.filter(s => s === 'low').length
 
   return (
     <div style={{
@@ -92,7 +121,8 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
         )}
       </div>
       {findings.slice(0, 3).map((finding, i) => {
-        const severity = finding.severity ?? extractSeverity(finding.issue)
+        const parsed = parseIssue(finding.issue)
+        const severity = finding.severity ?? parsed.severity
         return (
           <div key={finding.id} style={{
             display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', cursor: 'pointer',
@@ -108,7 +138,7 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
             }}>{t(`severity.${severity}`)}</span>
             <span style={{
               flex: '1 1 0%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>{finding.issue}</span>
+            }}>{parsed.text}</span>
           </div>
         )
       })}
@@ -135,15 +165,14 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
 }
 
 /** Turn-tail card wrapper props. */
-export interface AuditTurnTailProps extends PropsRuntime<'conversation.chat.turnTail'> {
-  sessionId: SessionId
-  useProjection: UseProjection
-  openSidebar: (address: string) => void
-}
+export type AuditTurnTailProps =
+  PropsRuntime<'conversation.chat.turnTail'>
+  & PropsLocale<'audit'>
+  & { openSidebar: (address: string) => void }
 
 /** Turn-tail entry point. */
 export function AuditTurnTail({ sessionId, useProjection, openSidebar, t }: AuditTurnTailProps) {
-  const state = useProjection<AuditState>('audit')
+  const state = useProjection('audit')
   if (!state || state.round === 0 || state.findings.length === 0) return null
 
   const handleOpenReview = () => {
