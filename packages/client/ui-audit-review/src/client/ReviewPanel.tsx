@@ -445,7 +445,6 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
   const [docError, setDocError] = useState<string>('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectionKey, setSelectionKey] = useState(0)
-  const [view, setView] = useState<'original' | 'text' | null>(null)
   const [docxReady, setDocxReady] = useState(false)
   // Set once the original renders, so re-rendering for a replacement shows no loading gap.
   const [docxShown, setDocxShown] = useState(false)
@@ -461,7 +460,7 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
 
   const documentPath = state?.documentPath ?? null
   const hasOriginal = documentPath !== null && /\.docx$/i.test(documentPath)
-  const activeView = view ?? (hasOriginal ? 'original' : 'text')
+  const activeView = hasOriginal ? 'original' : 'text'
 
   // Findings whose replacements the document must show. A change re-renders the original,
   // because a replaced quote no longer exists in the text it was located in.
@@ -653,18 +652,6 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
 
       {/* Right: document, rendered from the original .docx when the session has one */}
       <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
-        {hasOriginal && (
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-            {(['original', 'text'] as const).map(mode => (
-              <button key={mode} type="button" onClick={() => setView(mode)} style={{
-                padding: '3px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '6px',
-                border: `1px solid ${activeView === mode ? 'rgb(23, 92, 211)' : 'rgb(220, 225, 235)'}`,
-                background: activeView === mode ? 'rgb(23, 92, 211)' : 'white',
-                color: activeView === mode ? 'white' : 'rgb(70, 80, 100)',
-              }}>{t(`view.${mode}`)}</button>
-            ))}
-          </div>
-        )}
         {unlocated && (
           <div style={{ fontSize: '12px', color: 'rgb(178, 106, 0)', marginBottom: '8px' }}>{t('preview.unlocated')}</div>
         )}
