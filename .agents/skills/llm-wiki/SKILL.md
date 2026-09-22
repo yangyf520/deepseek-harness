@@ -1,6 +1,6 @@
 ---
 name: llm-wiki
-description: Load when the workspace may use a local knowledge wiki — `.wiki/` exists, the user uploads documents, or `.wiki/inbox/` has files. Auto-ingest new sources, then answer from wiki indexes when in scope. No npm package; this skill is the integration surface under DeepSeek Harness.
+description: Load when the workspace may use a local knowledge wiki — `.wiki/` exists, the user uploads documents, or `.wiki/inbox/` has files. Clarify what an uploaded document is for before acting, auto-ingest new sources, then answer from wiki indexes when in scope. No npm package; this skill is the integration surface under DeepSeek Harness.
 ---
 
 # LLM Wiki on DeepSeek Harness
@@ -16,13 +16,25 @@ Upload documents or ask questions in normal language. Do **not** require the use
 1. **Load this skill** when any trigger in [Auto-load](#auto-load) matches — before other research.
 2. **Ensure `.wiki/`** exists ([Initialize](#initialize-local)); create silently if missing.
 3. **Ingest** new sources automatically ([Auto-ingest](#auto-ingest)); compile and refresh indexes.
-4. **Answer** using [Query priority](#query-priority) and [Query Lite](#query-lite-protocol) when in scope; fall back only when wiki evidence is insufficient.
+4. **Ask before acting** when a document arrives without a stated task ([Untasked upload](#untasked-upload)); never open with an audit, report, or rewrite.
+5. **Answer** using [Query priority](#query-priority) and [Query Lite](#query-lite-protocol) when in scope; fall back only when wiki evidence is insufficient.
 
 Report briefly what was ingested or what the wiki did not cover; do not narrate internal routing unless the user asks.
 
 ## Separation from coding
 
 If the turn is implementing or verifying **code** (`dev-loop` or equivalent): use this skill **read-only** (Query Lite / indexes). Do **not** ingest, compile, init, or otherwise mutate `.wiki/` on that path. Mutating wiki is only for knowledge turns (uploads, inbox, explicit ingest/maintain).
+
+## Untasked upload
+
+A document arrival is not a task. When attachments arrive or `inbox/` gains files and the message states no action, work out the likely intent and ask — the silent [Auto-ingest](#auto-ingest) may still run, but no audit, report, rewrite, or answer starts before the reply.
+
+1. **Identify** — read only the first pages and headings of the attachment (or its `raw/` copy); name the document and its type: requirements/PRD, regulation, contract, design or spec, test material, data or report, deck, general document.
+2. **Infer from habits** — read `.wiki/_index.md` and the tail of `.wiki/log.md`, then the outputs this workspace already produced for comparable documents; those show what this user usually asks for. With no history, rank by the document type alone.
+3. **Offer next actions** in one `ask_user_question` call, in the user's language: `header` names the type, `question` names the document, and 2–4 `options` are the inferred actions, most likely first with `(Recommended)` and the outcome in its `description` — for example audit/review, extract requirements, check against regulations, summarize, revise, archive only.
+4. **Wait for the choice**, then run it: an audit runs the audit workflow, and archive-only stops after ingest.
+
+Skip the question when the message already states the task, when the user continues an earlier round on the same document, or when the file arrives inside an ongoing task.
 
 ## Auto-load
 
