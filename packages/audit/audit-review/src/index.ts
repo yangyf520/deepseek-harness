@@ -12,6 +12,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-fs'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {
   AuditState,
@@ -161,15 +162,20 @@ function renderAccepted(base: string, findings: readonly AuditFinding[]):
 }
 
 /**
- * Reject findings whose anchors cannot be located verbatim in the audited file,
- * so a recorded quote always pins the line review and apply then act on.
+ * Resolve findings whose anchors must be located verbatim in the audited file. A unique quote
+ * fixes the span, so the line the caller reported is replaced by the one the quote occupies:
+ * review and apply act on the same text either way, and a hand-counted line never rejects the
+ * round. Only a quote that is missing or ambiguous makes the round unusable.
  * @param ctx - Host context carrying the filesystem service.
  * @param cwd - Session working directory resolving `anchor.path`.
  * @param findings - Findings about to be recorded.
- * @returns one message per unusable anchor; empty when every anchor matches.
+ * @returns the findings carrying quote-pinned lines, and one message per unusable anchor; the
+ * findings are complete only when there are no problems.
  */
-async function anchorProblems(ctx: Context, cwd: string | undefined, findings: readonly AuditFinding[]): Promise<string[]> {
+async function resolveAnchors(ctx: Context, cwd: string | undefined, findings: readonly AuditFinding[]):
+Promise<{ problems: string[]; findings: AuditFinding[] }> {
   const problems: string[] = []
+  const pinned: AuditFinding[] = []
   const contents = new Map<string, string>()
   for (const finding of findings) {
     let content = contents.get(finding.anchor.path)
@@ -198,15 +204,13 @@ async function anchorProblems(ctx: Context, cwd: string | undefined, findings: r
       continue
     }
     const line = lineAt(content, first)
-    if (line !== finding.anchor.line) {
-      problems.push(`${finding.id}: anchor.quote sits on line ${line} (1-based), not line ${finding.anchor.line}`)
-    }
+    pinned.push(line === finding.anchor.line ? finding : { ...finding, anchor: { ...finding.anchor, line } })
   }
-  return problems
+  return { problems, findings: pinned }
 }
 
 /** The audit_write tool definition. */
-const auditWriteToolDescription = 'Record audit findings after analyzing a document. MUST be called when the user asks to audit/review a document. Each finding cites a specific location with a quoted anchor and a replacement suggestion. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing, ambiguous, or on a different line rejects the whole call, so fix the anchor and call again. For more than 3 findings write work/findings.json with Python json.dump and pass findingsFile instead of hand-writing the inline array: long inline arrays drop required fields and waste retries.'
+const auditWriteToolDescription = 'Record audit findings after analyzing a document. MUST be called when the user asks to audit/review a document. Each finding cites a specific location with a quoted anchor and a replacement suggestion. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing or ambiguous rejects the whole call, so fix the anchor and call again. For more than 3 findings write a temporary JSON file (e.g. /tmp/findings.json) with Python json.dump and pass findingsFile instead of hand-writing the inline array: long inline arrays drop required fields and waste retries.'
 
 /**
  * Problems in one parsed findings file, element by element: file content skips the tool schema's
@@ -293,7 +297,7 @@ function createAuditWriteTool(ctx: Context) {
       documentPath: { type: 'string', required: true, description: 'Path to the original document being audited (the file the user uploaded or specified).' },
       findings: {
         type: 'array',
-        description: 'Inline findings; reliable up to 3. For more, write work/findings.json with Python json.dump and pass findingsFile instead. Ignored when findingsFile is set.',
+        description: 'Inline findings; reliable up to 3. For more, write a temporary JSON file (e.g. /tmp/findings.json) with Python json.dump and pass findingsFile instead. Ignored when findingsFile is set.',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -306,7 +310,7 @@ function createAuditWriteTool(ctx: Context) {
               required: true,
               properties: {
                 path: { type: 'string', required: true, description: 'Path of the audited text file relative to the workspace - the file the quote is copied from (e.g. work/<name>.txt), NOT the original document.' },
-                line: { type: 'integer', required: true, description: 'Line number (1-based) in the text file that contains the quote. It MUST be the line where the quote actually sits.' },
+                line: { type: 'integer', required: true, description: 'Line number (1-based) in the text file that contains the quote.' },
                 quote: { type: 'string', required: true, description: 'Text copied verbatim from that line, never paraphrased or re-wrapped. It MUST appear exactly once in the file: extend it with surrounding words when a short quote repeats. The call is rejected otherwise.' },
               },
             },
@@ -338,12 +342,12 @@ function createAuditWriteTool(ctx: Context) {
       const session = exec.agent?.session
       if (session === undefined) throw new Error('audit_write: no active session')
       const findings = await resolveFindings(ctx, session.header.cwd, args)
-      const problems = await anchorProblems(ctx, session.header.cwd, findings)
-      if (problems.length > 0) {
-        throw new Error(`audit_write: every anchor must match the audited file; fix these and call again:\n${problems.join('\n')}`)
+      const anchor = await resolveAnchors(ctx, session.header.cwd, findings)
+      if (anchor.problems.length > 0) {
+        throw new Error(`audit_write: every anchor must match the audited file; fix these and call again:\n${anchor.problems.join('\n')}`)
       }
-      session.append('audit/write', { round: args.round, documentPath: args.documentPath, findings })
-      return { round: args.round, findingCount: findings.length }
+      session.append('audit/write', { round: args.round, documentPath: args.documentPath, findings: anchor.findings })
+      return { round: args.round, findingCount: anchor.findings.length }
     },
   })
 }
@@ -354,7 +358,7 @@ const applyBases = new Map<string, { round: number; base: string }>()
 
 /** Remote service for user decisions on audit findings. */
 export class AuditReviewService extends TypertRemoteService {
-  static inject = ['sessions', 'sessionProjections', 'fs', 'tools', 'systemPrompt']
+  static inject = ['sessions', 'sessionProjections', 'fs', 'tools', 'systemPrompt', 'sandboxPolicy']
 
   constructor(ctx: Context) {
     super(ctx, 'auditReview')
@@ -366,37 +370,39 @@ export class AuditReviewService extends TypertRemoteService {
     this.ctx.systemPrompt.section({
       name: 'audit-review:guidance',
       order: 100,
-      text: `When the user asks to audit or review a document:
+      text: `When the user uploads a document without saying what to do with it, ask first with \`ask_user_question\`: offer auditing/reviewing the document as the recommended option plus at least one alternative (summarize, extract requirements, revise), and never start converting or auditing before the answer.
+
+When the user asks to audit or review a document:
 
 ## Step 1: Generate HTML preview and text extraction
 Before auditing, convert the document to HTML for preview and plain text for quoting:
-1. Use python-docx (via \`load_workspace_dependencies\`) to read the document; when writing the converter, guard every optional attribute: \`paragraph.style\` and \`paragraph.alignment\` are \`None\` for paragraphs without explicit formatting, so read them as \`p.style.name if p.style is not None else ''\` — an unguarded \`block.style.name\` crashes the whole conversion
-2. Generate an HTML file preserving structure (paragraphs, tables, headings, lists)
+1. Write the converter script and every intermediate file under the system temporary directory (e.g. \`/tmp\`), never inside the workspace — the only new workspace files are the two outputs below
+2. Use python-docx to read the document: call the \`load_workspace_dependencies\` tool when it is available and otherwise use the configured Python environment; when writing the converter, guard every optional attribute: \`paragraph.style\` and \`paragraph.alignment\` are \`None\` for paragraphs without explicit formatting, so read them as \`p.style.name if p.style is not None else ''\` — an unguarded \`block.style.name\` crashes the whole conversion
+3. Generate an HTML file preserving structure (paragraphs, tables, headings, lists)
    - Save as \`work/<name>.html\` (same base name as the text file)
-3. Extract plain text from the HTML (strip tags, preserve line breaks)
+4. Extract plain text from the HTML (strip tags, preserve line breaks)
    - Save as \`work/<name>.txt\`
-4. The HTML file enables formatted preview; the text file is the audit source
+5. The HTML file enables formatted preview; the text file is the audit source
 
 ## Step 2: Audit the document
 1. Read the plain text file (\`work/<name>.txt\`) for analysis
 2. Call \`audit_write\` to record all findings
-   - With 3 or fewer findings pass them inline; with more, build the array in Python and \`json.dump\` it to \`work/findings.json\`, then pass \`findingsFile\` — hand-written long inline arrays drop required fields and every drop rejects the whole call
+   - With 3 or fewer findings pass them inline; with more, build the array in Python and \`json.dump\` it to a temporary file (e.g. \`/tmp/findings.json\`), then pass \`findingsFile\` — hand-written long inline arrays drop required fields and every drop rejects the whole call
    - \`anchor.path\` MUST point to the text file (\`work/<name>.txt\`)
    - \`anchor.line\` MUST be the 1-based line that contains the quote
    - \`anchor.quote\` MUST be copied verbatim and appear exactly once in the file; extend it with surrounding words when a short quote repeats
    - \`issue\` MUST start with [高风险], [中风险] or [低风险]
    - \`replacement\` MUST replace exactly the quoted span and read as correct prose afterwards; set it to the empty string to delete the whole line, never to instructions or notes
    - \`documentPath\` is the original document path
-3. After calling the tool, output ONLY:
-   - A one-line summary: "审计完成，共 N 条发现，请查看审查卡片。"
-   - A download link for the modified document (if applicable)
+3. After calling the tool, reply with ONLY this one line: "审计完成，共 N 条发现，请查看审查卡片。"
 4. NEVER output findings as text, tables, or lists - the card displays them
 5. NEVER explain your analysis process or reasoning
+6. NEVER list, link, or present the generated files and NEVER call the file-presentation tool - the review card already carries the review and download actions
 
 ## Important
 - The HTML file (\`work/<name>.html\`) and text file (\`work/<name>.txt\`) MUST have the same base name
 - The review panel renders the HTML file for formatted preview with highlight linkage
-- \`audit_write\` validates every anchor against the file and rejects the call when a quote is missing, ambiguous, or sits on a different line
+- \`audit_write\` validates every anchor against the file and rejects the call when a quote is missing or ambiguous
 - Applying a finding replaces its quote in the text file; an empty replacement deletes the quoted line`,
     })
   }
@@ -460,7 +466,9 @@ Before auditing, convert the document to HTML for preview and plain text for quo
     const accepted = state.findings.filter(f => f.anchor.path === finding.anchor.path && state.decisions[f.id] === 'accept')
     const rendered = renderAccepted(base, accepted)
     if (!rendered.ok) return { ok: false, error: { code: rendered.code, message: rendered.message } }
-    await this.ctx.fs.writeText(target, rendered.text)
+    // The session's own policy fences the write: its cwd is the workspace-write boundary, which can
+    // differ from the deployment fallback root.
+    await this.ctx.fs.writeText(target, rendered.text, undefined, undefined, this.ctx.sandboxPolicy.resolve({ session }))
     return { ok: true }
   }
 }

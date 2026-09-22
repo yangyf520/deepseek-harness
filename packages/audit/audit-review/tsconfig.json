@@ -13,6 +13,7 @@
     { "path": "../../session/session-projection" },
     { "path": "../../typert/protocol" },
     { "path": "../../core/tools" },
-    { "path": "../../fs/fs" }
+    { "path": "../../fs/fs" },
+    { "path": "../../sandbox/sandbox-policy" }
   ]
 }
