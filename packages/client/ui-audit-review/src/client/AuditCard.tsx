@@ -7,6 +7,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AuditExportResult } from '@deepseek-ai/dsh-audit-review/types'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ReadFileBytes } from './ReviewPanel.tsx'
+import { splitBasis } from './regulation.ts'
 
 /** Severity level for color coding. */
 export type Severity = 'high' | 'medium' | 'low'
@@ -83,6 +84,32 @@ export function findingSummary(finding: AuditFinding): string {
   return first.length > 20 ? `${first.slice(0, 20)}…` : first
 }
 
+/** Severity order in the review list: most severe first. */
+const SEVERITY_RANK: Record<Severity, number> = { high: 0, medium: 1, low: 2 }
+
+/**
+ * Order one round's findings for review: the findings that rest on a regulation come first, then
+ * the most severe. A finding rests on a regulation when its issue carries a citation, as the review
+ * panel's basis line does. Findings that tie keep the order the audit recorded them in.
+ * @param findings - Findings as the audit projection records them.
+ * @returns the same findings, in review order.
+ */
+export function orderFindings(findings: readonly AuditFinding[]): AuditFinding[] {
+  const ranked = findings.map((finding) => {
+    const parsed = parseIssue(finding.issue)
+    return {
+      finding,
+      restsOnRegulation: splitBasis(parsed.text).citations.length > 0,
+      severity: SEVERITY_RANK[finding.severity ?? parsed.severity],
+    }
+  })
+  ranked.sort((left, right) => {
+    if (left.restsOnRegulation !== right.restsOnRegulation) return left.restsOnRegulation ? -1 : 1
+    return left.severity - right.severity
+  })
+  return ranked.map(entry => entry.finding)
+}
+
 /** Audit state from projection. */
 export interface AuditState {
   round: number
@@ -102,7 +129,7 @@ interface AuditOverviewProps {
 
 /** Overview card showing summary and finding list. */
 export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditOverviewProps) {
-  const findings = state.findings
+  const findings = orderFindings(state.findings)
   const severities = findings.map(f => f.severity ?? parseIssue(f.issue).severity)
   const highCount = severities.filter(s => s === 'high').length
   const mediumCount = severities.filter(s => s === 'medium').length

@@ -7,13 +7,15 @@
  * @module
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { parseAsync, renderDocument } from 'docx-preview'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AuditDecision } from '@deepseek-ai/dsh-audit-review/types'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AuditState, AuditFinding, Severity } from './AuditCard.tsx'
-import { SEVERITY_COLOR, SEVERITY_BG, findingSummary, parseIssue } from './AuditCard.tsx'
+import { SEVERITY_COLOR, SEVERITY_BG, findingSummary, orderFindings, parseIssue } from './AuditCard.tsx'
+import type { RegulationArticle, RegulationCitation, ResolvedCitation } from './regulation.ts'
+import { citationLabel, loadRegulationArticle, resolveBasis, splitBasis } from './regulation.ts'
 
 /** Read file bytes from workspace. */
 export type ReadFileBytes = (sessionId: SessionId, path: string) => Promise<Uint8Array<ArrayBuffer>>
@@ -333,14 +335,85 @@ const DECISION_BORDER: Record<'accept' | 'reject' | 'pending', string> = {
 }
 
 /**
+ * The regulations a finding rests on: their names, and each cited provision's text read from the
+ * workspace wiki on demand, so a reviewer can read the rule before deciding. A citation no wiki page
+ * carries renders nothing, because a regulation the reviewer cannot open is not a basis.
+ */
+function BasisRow({ citations, sessionId, readFileBytes, t }: {
+  citations: readonly RegulationCitation[]
+  sessionId: SessionId
+  readFileBytes: ReadFileBytes
+  t: TranslateNS<'audit'>
+}) {
+  // Null until the wiki answers, so the row appears only for regulations it can open.
+  const [sources, setSources] = useState<ResolvedCitation[] | null>(null)
+  const [open, setOpen] = useState(false)
+  // Null until the first load finishes; the loaded text stays for later toggles.
+  const [articles, setArticles] = useState<RegulationArticle[] | null>(null)
+  useEffect(() => {
+    let live = true
+    void resolveBasis(readFileBytes, sessionId, citations).then((found) => { if (live) setSources(found) })
+    return () => { live = false }
+  }, [citations, sessionId, readFileBytes])
+  const toggle = (): void => {
+    const next = !open
+    setOpen(next)
+    if (!next || articles !== null || sources === null) return
+    void (async () => {
+      const loaded: RegulationArticle[] = []
+      for (const source of sources) {
+        const article = await loadRegulationArticle(readFileBytes, sessionId, source)
+        if (article !== null) loaded.push(article)
+      }
+      setArticles(loaded)
+    })()
+  }
+  if (sources === null || sources.length === 0) return null
+  const loading = open && articles === null
+
+  return (
+    <div style={{ marginBottom: '8px' }}>
+      {/* The 10px left inset lines the row up with the issue and suggestion text above and below it. */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', paddingLeft: '10px', fontSize: '11px', lineHeight: 1.5 }}>
+        <span style={{ color: 'rgb(23, 92, 211)', minWidth: 0 }}>
+          {t('finding.basis')}：{sources.map(citationLabel).join('、')}
+        </span>
+        <button type="button" onClick={(event) => { event.stopPropagation(); toggle() }} style={{
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0,
+          color: 'rgb(23, 92, 211)', fontSize: '11px', textDecoration: 'underline',
+        }}>{open ? t('finding.basisHide') : t('finding.basisView')}</button>
+      </div>
+      {open && (
+        <div style={{
+          marginTop: '6px', padding: '8px 10px', borderRadius: '6px', overflow: 'auto',
+          background: 'rgb(247, 249, 252)', border: '1px solid rgb(222, 230, 242)',
+          fontSize: '11px', lineHeight: 1.6, color: 'rgb(70, 80, 100)', maxHeight: '220px',
+        }}>
+          {loading && <span>{t('finding.basisLoading')}</span>}
+          {!loading && articles !== null && articles.length === 0 && <span>{t('finding.basisMissing')}</span>}
+          {articles?.map((article, at) => (
+            <div key={`${article.path}-${at}`} style={{ marginTop: at === 0 ? 0 : '8px' }}>
+              <div style={{ fontWeight: 600, color: 'rgb(30, 35, 45)' }}>{article.title}</div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{article.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Single finding card: accepting writes the suggestion into the document and undoing takes it back;
  * rejecting leaves the document alone and keeps the card in the list until the rejection is withdrawn.
  */
-function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
+function FindingCard({ finding, index, round, t, sessionId, readFileBytes, onDecide, onApply, decided }: {
   finding: AuditFinding
   index: number
   round: number
   t: TranslateNS<'audit'>
+  sessionId: SessionId
+  readFileBytes: ReadFileBytes
   onDecide: (findingId: string, round: number, decision: AuditDecision) => Promise<void>
   onApply: (findingId: string, round: number) => Promise<void>
   decided?: 'accept' | 'reject' | undefined
@@ -354,6 +427,8 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
     void onDecide(finding.id, round, decision)
   }
   const parsed = parseIssue(finding.issue)
+  // The citation renders as its own line, so the issue prose shows the problem alone.
+  const { prose, citations } = useMemo(() => splitBasis(parsed.text), [parsed.text])
   const severity = finding.severity ?? parsed.severity
   const severityLabel = t(`severity.${severity}`)
   const summary = findingSummary(finding)
@@ -422,8 +497,13 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
       <div style={{ fontSize: '13px', fontWeight: 400, marginBottom: '8px', lineHeight: 1.4, color: 'rgb(30, 35, 45)',
         background: 'rgb(255, 255, 255)', borderRadius: '6px', padding: '8px 10px',
       }}>
-        {parsed.text}
+        {prose}
       </div>
+
+      {/* Regulation the finding rests on */}
+      {citations.length > 0 && (
+        <BasisRow citations={citations} sessionId={sessionId} readFileBytes={readFileBytes} t={t} />
+      )}
 
       {/* Suggestion */}
       <div style={{
@@ -608,7 +688,7 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
     return <div style={{ padding: '20px', color: 'rgb(102, 112, 133)' }}>暂无审计数据</div>
   }
 
-  const findings = state.findings
+  const findings = orderFindings(state.findings)
   const accepted = Object.entries(state.decisions).filter(([, d]) => d === 'accept').length
   const rejected = Object.entries(state.decisions).filter(([, d]) => d === 'reject').length
 
@@ -629,6 +709,8 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
         index={index}
         round={state.round}
         t={t}
+        sessionId={sessionId}
+        readFileBytes={readFileBytes}
         onDecide={onDecide}
         onApply={onApply}
         decided={state.decisions[finding.id]}
@@ -660,8 +742,8 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
             </div>
           </div>
         </div>
-        {/* Increment selectionKey on each click to force the highlight effect to re-run. Every card
-            keeps the number it was audited under; a rejected card stays here and is withdrawn from it. */}
+        {/* Increment selectionKey on each click to force the highlight effect to re-run. The number
+            is the card's place in the review order; a rejected card stays here and is withdrawn from it. */}
         {findings.map((finding, index) => renderCard(finding, index))}
       </div>
 
