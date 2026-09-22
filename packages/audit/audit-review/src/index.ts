@@ -530,7 +530,7 @@ function createAuditWriteTool(ctx: Context) {
                 quote: { type: 'string', required: true, description: 'Text copied verbatim from that line, never paraphrased or re-wrapped. It MUST appear exactly once in the file: extend it with surrounding words when a short quote repeats. The call is rejected otherwise.' },
               },
             },
-            issue: { type: 'string', required: true, description: 'Description of the problem. MUST start with the level tag [高风险], [中风险] or [低风险]; the card color and ordering read that tag.' },
+            issue: { type: 'string', required: true, description: 'Description of the problem. MUST start with the level tag [高风险], [中风险] or [低风险]; the card color and ordering read that tag. A finding that rests on a regulation MUST end with 依据：《法规名》第N条, naming only a regulation page loaded for this audit; findings with no regulatory basis carry no 依据.' },
             replacement: { type: 'string', required: true, description: 'Text that replaces exactly the quoted span; it must read as correct document prose after the swap. For a whole-line deletion set it to the empty string (the line is removed). NEVER put instructions, parentheses, or notes such as （删除该行） here. MUST be inside each finding object, NOT at the top level.' },
           },
         },
@@ -595,19 +595,24 @@ When the user asks to audit or review a document:
 Call \`audit_convert_document\` with the original document path; it writes \`work/<name>.html\` (formatted preview) and \`work/<name>.txt\` (plain text, one paragraph or table row per line — the audit anchor source) in one call. Only when the tool fails may you write your own converter with python-docx under \`/tmp\` with a name unique to this document, guarding every optional attribute (\`paragraph.style\` and \`paragraph.alignment\` are \`None\` without explicit formatting: read \`p.style.name if p.style is not None else ''\`).
 
 ## Step 2: Audit the document
-1. Read the plain text file (\`work/<name>.txt\`) for analysis
-2. Call \`audit_write\` to record all findings
+1. Load the review basis BEFORE the document, inside this same single analysis (it adds no tool round-trip): read \`.wiki/wiki/_index.md\`, then EVERY regulation topic page the group lists for this document — the group overview page alone is a digest that omits whole articles, so an obligation absent from it can never become a finding. Regulation obligations are mandatory input, not background reading
+2. Turn that basis into a worklist of every obligation this product triggers, one line each as 适用法规｜条号｜义务｜触发条件 — including the obligations the document never mentions, which are exactly the ones a document-driven reading misses
+3. Read the plain text file (\`work/<name>.txt\`) and judge it in two sweeps of that same analysis:
+   - Obligation sweep, always first: for every worklist line locate the passage that carries it. No passage anywhere is a missing-obligation finding and the highest priority; a passage weaker than the obligation is a finding too; an obligation this product does not trigger gets no finding (when the document itself claims it applies, say in one clause why it does not)
+   - Document sweep: walk the document section by section for problems no obligation covers (internal contradictions, missing values, inconsistent terms and formats) instead of reporting only what the first reading happens to notice
+4. Call \`audit_write\` to record all findings, ordered by severity and, within one severity, with compliance findings (those carrying 依据) before document-quality ones
    - With 3 or fewer findings pass them inline; with more, build the array in Python by slicing the quote for each finding straight out of the text file — never retype quotes by hand, full-width lookalikes break the verbatim match — and \`json.dump\` it to a temporary file named after the document (e.g. \`/tmp/findings-<name>.json\`), then pass \`findingsFile\`
    - \`anchor.path\` MUST point to the text file (\`work/<name>.txt\`)
    - \`anchor.line\` MUST be the 1-based line that contains the quote
    - \`anchor.quote\` MUST be copied verbatim and appear exactly once in the file; extend it with surrounding words when a short quote repeats
-   - \`issue\` MUST start with [高风险], [中风险] or [低风险]
+   - \`issue\` MUST start with [高风险], [中风险] or [低风险]: a mandatory provision (应当/不得) the document breaks or leaves unimplemented is [高风险], a missing 制度或流程 is [中风险], a refinement is [低风险]. A finding that rests on a regulation MUST end with its citation as 依据：《法规名》第N条, citing only a regulation page loaded in step 1; a finding that rests on no regulation (contradictions, missing values, inconsistent terms, formatting) carries no 依据 and invents none. An audit reporting no 依据 finding at all is valid only when the worklist of step 2 held no applicable obligation
    - \`replacement\` MUST replace exactly the quoted span and read as correct prose afterwards; set it to the empty string to delete the whole line, never to instructions or notes
    - \`documentPath\` is the original document path
-3. The moment \`audit_write\` succeeds, reply with ONLY this one line and make no further tool calls in between — background archiving never delays the reply: "审计完成，共 N 条发现，请查看审查卡片。"
-4. NEVER output findings as text, tables, or lists - the card displays them
-5. NEVER explain your analysis process or reasoning
-6. NEVER list, link, or present the generated files and NEVER call the file-presentation tool - the review card already carries the review and download actions
+5. Audit the current file every time: a later audit of the same document — same conversation, unchanged content, files already converted — still reloads the basis and reruns both sweeps over the whole document, never a delta limited to an earlier round's items. NEVER re-record a finding the user already rejected unless its quoted text changed or you now cite the regulation page it rests on
+6. The moment \`audit_write\` succeeds, reply with ONLY this one line and make no further tool calls in between — background archiving never delays the reply: "审计完成，共 N 条发现，请查看审查卡片。"
+7. NEVER output findings as text, tables, or lists - the card displays them
+8. NEVER explain your analysis process or reasoning
+9. NEVER list, link, or present the generated files and NEVER call the file-presentation tool - the review card already carries the review and download actions
 
 ## Important
 - The HTML file (\`work/<name>.html\`) and text file (\`work/<name>.txt\`) MUST have the same base name
