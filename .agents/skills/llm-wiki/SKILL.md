@@ -30,9 +30,9 @@ If the turn is implementing or verifying **code** (`dev-loop` or equivalent): us
 A document arrival is not a task. When attachments arrive or `inbox/` gains files and the message states no action, work out the likely intent and ask — the silent [Auto-ingest](#auto-ingest) may still run, but no audit, report, rewrite, or answer starts before the reply.
 
 1. **Identify** — read only the first pages and headings of the attachment (or its `raw/` copy); name the document and its type: requirements/PRD, regulation, contract, design or spec, test material, data or report, deck, general document.
-2. **Infer from habits** — read `.wiki/_index.md` and the tail of `.wiki/log.md`, then the outputs this workspace already produced for comparable documents; those show what this user usually asks for. With no history, rank by the document type alone.
+2. **Infer from habits** — read `.wiki/_index.md` and the tail of `.wiki/log.md` in one call; the outputs this workspace already produced for comparable documents show what this user usually asks for. With no history, rank by the document type alone. Identification and inference together stay within two tool calls — the question must not wait on a long reconnaissance.
 3. **Offer next actions** in one `ask_user_question` call, in the user's language: `header` names the type, `question` names the document, and 2–4 `options` are the inferred actions, most likely first with `(Recommended)` and the outcome in its `description` — for example audit/review, extract requirements, check against regulations, summarize, revise, archive only.
-4. **Wait for the choice**, then run it: an audit runs the audit workflow, and archive-only stops after ingest.
+4. **Wait for the choice**, then run it: an audit runs the audit workflow, and archive-only stops after ingest. A choice with its own workflow makes the turn a task turn: archive the source with a single call (`raw/` copy plus one `log.md` line) before starting that workflow, and leave topic compilation and index refresh to a later knowledge turn — wiki bookkeeping never delays or extends the task.
 
 Skip the question when the message already states the task, when the user continues an earlier round on the same document, or when the file arrives inside an ongoing task.
 
