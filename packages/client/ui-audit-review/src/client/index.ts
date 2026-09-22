@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-audit-review/types'
-import type { AuditDecision } from '@deepseek-ai/dsh-audit-review/types'
+import type { AuditDecision, AuditExportResult } from '@deepseek-ai/dsh-audit-review/types'
 import type {} from '@deepseek-ai/dsh-audit-review/remote'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
@@ -71,6 +71,12 @@ export function apply(ctx: ClientContext): void {
         ctx.sidebarRight?.openResource?.(address)
       },
       readFileBytes: (sid: SessionId, path: string) => readWorkspaceBytes(ctx, sid, path),
+      // Unwrap the Remote envelope so the card handles one result type: a transport failure maps
+      // onto the same { ok: false, error } the export itself returns.
+      exportDocument: async (sid: SessionId, round: number): Promise<AuditExportResult> => {
+        const result = await ctx.remote.auditReview.exportDocument({ sessionId: sid, round })
+        return result.ok ? result.value : { ok: false, error: result.error }
+      },
     }),
   }, AuditTurnTail))
 

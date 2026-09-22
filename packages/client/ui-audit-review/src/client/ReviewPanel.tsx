@@ -13,7 +13,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AuditDecision } from '@deepseek-ai/dsh-audit-review/types'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AuditState, AuditFinding, Severity } from './AuditCard.tsx'
-import { SEVERITY_COLOR, SEVERITY_BG, parseIssue } from './AuditCard.tsx'
+import { SEVERITY_COLOR, SEVERITY_BG, findingSummary, parseIssue } from './AuditCard.tsx'
 
 /** Read file bytes from workspace. */
 export type ReadFileBytes = (sessionId: SessionId, path: string) => Promise<Uint8Array<ArrayBuffer>>
@@ -356,8 +356,7 @@ function FindingCard({ finding, index, round, t, onDecide, onApply, decided }: {
   const parsed = parseIssue(finding.issue)
   const severity = finding.severity ?? parsed.severity
   const severityLabel = t(`severity.${severity}`)
-  const fallback = (parsed.text.match(/[^。！？!?\n]+/)?.[0] ?? parsed.text).trim()
-  const summary = finding.title ?? (fallback.length > 20 ? `${fallback.slice(0, 20)}…` : fallback)
+  const summary = findingSummary(finding)
 
   return (
     <div style={{
@@ -455,6 +454,8 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
   const docTextRef = useRef<HTMLDivElement | null>(null)
   const docxRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Left findings list, scrolled back to its top by a click on the sticky header.
+  const listRef = useRef<HTMLDivElement | null>(null)
   // Card whose height the located document text aligns to on selection.
   const cardRef = useRef<HTMLElement | null>(null)
 
@@ -638,12 +639,26 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* Left: Findings list */}
-      <div style={{ width: '400px', overflow: 'auto', padding: '16px', background: 'rgb(250, 251, 252)', borderRight: '1px solid rgb(234, 236, 240)' }}>
-        <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>
-          {t('overview.title')} ({findings.length})
-        </div>
-        <div style={{ fontSize: '12px', color: 'rgb(102, 112, 133)', marginBottom: '16px' }}>
-          {accepted} {t('status.accepted')} · {rejected} {t('status.rejected')} · {findings.length - accepted - rejected} {t('overview.findings')}
+      <div ref={listRef} style={{ width: '400px', overflow: 'auto', padding: '16px', background: 'rgb(250, 251, 252)', borderRight: '1px solid rgb(234, 236, 240)' }}>
+        {/* Sticky header: the title and counts stay visible while the findings scroll under them;
+            its padding keeps the gap to the first card while stuck, and a click returns the list to
+            the top. */}
+        <div
+          onClick={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+          style={{
+            position: 'sticky', top: '-16px', zIndex: 1,
+            margin: '-16px -16px 0', padding: '12px 16px', cursor: 'pointer',
+            background: 'rgb(250, 251, 252)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600 }}>
+              {t('overview.title')} ({findings.length})
+            </div>
+            <div style={{ fontSize: '12px', color: 'rgb(102, 112, 133)' }}>
+              {accepted} {t('status.accepted')} · {rejected} {t('status.rejected')} · {findings.length - accepted - rejected} {t('overview.findings')}
+            </div>
+          </div>
         </div>
         {/* Increment selectionKey on each click to force the highlight effect to re-run. Every card
             keeps the number it was audited under; a rejected card stays here and is withdrawn from it. */}

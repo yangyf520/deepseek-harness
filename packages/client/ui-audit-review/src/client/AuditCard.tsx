@@ -4,6 +4,7 @@
  */
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { AuditExportResult } from '@deepseek-ai/dsh-audit-review/types'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ReadFileBytes } from './ReviewPanel.tsx'
 
@@ -70,6 +71,18 @@ export interface AuditFinding {
   severity?: Severity
 }
 
+/**
+ * One-line label the overview rows and the panel card headers both show: the title `audit_write`
+ * recorded, or the first sentence of the issue prose clipped to a header-sized label.
+ * @param finding - Finding as the audit projection records it.
+ * @returns the finding's display label.
+ */
+export function findingSummary(finding: AuditFinding): string {
+  if (finding.title !== undefined && finding.title !== '') return finding.title
+  const first = (parseIssue(finding.issue).text.match(/[^。！？!?\n]+/)?.[0] ?? finding.issue).trim()
+  return first.length > 20 ? `${first.slice(0, 20)}…` : first
+}
+
 /** Audit state from projection. */
 export interface AuditState {
   round: number
@@ -122,8 +135,7 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
         )}
       </div>
       {findings.slice(0, 3).map((finding, i) => {
-        const parsed = parseIssue(finding.issue)
-        const severity = finding.severity ?? parsed.severity
+        const severity = finding.severity ?? parseIssue(finding.issue).severity
         return (
           <div key={finding.id} style={{
             display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', cursor: 'pointer',
@@ -139,7 +151,7 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
             }}>{t(`severity.${severity}`)}</span>
             <span style={{
               flex: '1 1 0%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>{parsed.text}</span>
+            }}>{findingSummary(finding)}</span>
           </div>
         )
       })}
@@ -172,10 +184,11 @@ export type AuditTurnTailProps =
   & {
     openSidebar: (address: string) => void
     readFileBytes: ReadFileBytes
+    exportDocument: (sessionId: SessionId, round: number) => Promise<AuditExportResult>
   }
 
 /** Turn-tail entry point. */
-export function AuditTurnTail({ sessionId, useProjection, openSidebar, readFileBytes, t }: AuditTurnTailProps) {
+export function AuditTurnTail({ sessionId, useProjection, openSidebar, readFileBytes, exportDocument, t }: AuditTurnTailProps) {
   const state = useProjection('audit')
   if (!state || state.round === 0 || state.findings.length === 0) return null
 
@@ -184,14 +197,21 @@ export function AuditTurnTail({ sessionId, useProjection, openSidebar, readFileB
   }
 
   const handleDownload = () => {
-    const docPath = state.findings[0]?.anchor?.path
-    if (!docPath) return
-    // The audited file is the one the review panel rewrites, so a download carries the accepted findings.
-    void readFileBytes(sessionId, docPath).then((bytes) => {
+    // The exported .docx is the uploaded document with the accepted findings applied, so the
+    // download keeps the original format instead of serving the plain-text audit source.
+    void exportDocument(sessionId, state.round).then(async (result) => {
+      if (!result.ok) {
+        console.error('audit export failed:', result.error.message)
+        return
+      }
+      if (result.value.skipped > 0) {
+        console.warn(`audit export skipped ${result.value.skipped} finding(s) whose quote does not match the document`)
+      }
+      const bytes = await readFileBytes(sessionId, result.value.path)
       const url = URL.createObjectURL(new Blob([bytes]))
       const link = document.createElement('a')
       link.href = url
-      link.download = docPath.split('/').pop() || 'document'
+      link.download = result.value.filename
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 0)
     }).catch((error: unknown) => {
