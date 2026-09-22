@@ -38,6 +38,23 @@ const AUDIT_REVIEW_ID = '@deepseek-ai/dsh-client-ui-audit-review'
 export const inject = ['slots', 'locale', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles', 'remote.auditReview']
 
 /**
+ * Read one workspace file as bytes through the authenticated Remote. The review panel and the
+ * overview card share it, so a download always serves the file's current content.
+ * @param ctx - client root context carrying the Remote.
+ * @param sessionId - session whose workspace holds the file.
+ * @param path - workspace-relative or absolute file path.
+ * @returns the file bytes.
+ */
+async function readWorkspaceBytes(ctx: ClientContext, sessionId: SessionId, path: string): Promise<Uint8Array<ArrayBuffer>> {
+  const result = await ctx.remote.workspaceFiles.readAll(sessionId, path)
+  if (!result.ok) throw new Error(result.error.message)
+  const binary = atob(result.value.data)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+/**
  * Register the audit review cards and sidebar panel.
  * @param ctx - client root context.
  */
@@ -53,6 +70,7 @@ export function apply(ctx: ClientContext): void {
       openSidebar: (address: string) => {
         ctx.sidebarRight?.openResource?.(address)
       },
+      readFileBytes: (sid: SessionId, path: string) => readWorkspaceBytes(ctx, sid, path),
     }),
   }, AuditTurnTail))
 
@@ -71,14 +89,7 @@ export function apply(ctx: ClientContext): void {
     key: AUDIT_REVIEW_ID,
     locale: NS,
     inject: (sessionId: SessionId) => ({
-      readFileBytes: async (sid: SessionId, path: string) => {
-        const result = await ctx.remote.workspaceFiles.readAll(sid, path)
-        if (!result.ok) throw new Error(result.error.message)
-        const binary = atob(result.value.data)
-        const bytes = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-        return bytes
-      },
+      readFileBytes: (sid: SessionId, path: string) => readWorkspaceBytes(ctx, sid, path),
       onDecide: async (findingId: string, round: number, decision: AuditDecision) => {
         try {
           await ctx.remote.auditReview.decide({ sessionId, round, findingId, decision })

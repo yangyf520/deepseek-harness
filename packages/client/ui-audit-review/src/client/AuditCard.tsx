@@ -5,6 +5,7 @@
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ReadFileBytes } from './ReviewPanel.tsx'
 
 /** Severity level for color coding. */
 export type Severity = 'high' | 'medium' | 'low'
@@ -168,10 +169,13 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
 export type AuditTurnTailProps =
   PropsRuntime<'conversation.chat.turnTail'>
   & PropsLocale<'audit'>
-  & { openSidebar: (address: string) => void }
+  & {
+    openSidebar: (address: string) => void
+    readFileBytes: ReadFileBytes
+  }
 
 /** Turn-tail entry point. */
-export function AuditTurnTail({ sessionId, useProjection, openSidebar, t }: AuditTurnTailProps) {
+export function AuditTurnTail({ sessionId, useProjection, openSidebar, readFileBytes, t }: AuditTurnTailProps) {
   const state = useProjection('audit')
   if (!state || state.round === 0 || state.findings.length === 0) return null
 
@@ -182,11 +186,17 @@ export function AuditTurnTail({ sessionId, useProjection, openSidebar, t }: Audi
   const handleDownload = () => {
     const docPath = state.findings[0]?.anchor?.path
     if (!docPath) return
-    // Trigger download via workspace file API
-    const link = document.createElement('a')
-    link.href = `/api/workspace/${sessionId}/files/${encodeURIComponent(docPath)}`
-    link.download = docPath.split('/').pop() || 'document'
-    link.click()
+    // The audited file is the one the review panel rewrites, so a download carries the accepted findings.
+    void readFileBytes(sessionId, docPath).then((bytes) => {
+      const url = URL.createObjectURL(new Blob([bytes]))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = docPath.split('/').pop() || 'document'
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    }).catch((error: unknown) => {
+      console.error('audit download failed:', error)
+    })
   }
 
   return <AuditOverviewCard sessionId={sessionId} state={state} onOpenReview={handleOpenReview} onDownload={handleDownload} t={t} />
