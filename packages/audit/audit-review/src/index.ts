@@ -6,6 +6,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import { basename } from 'node:path'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -13,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from '@deepseek-ai/dsh-shell'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {
   AuditState,
@@ -21,6 +23,8 @@ import type {
   AuditDecideResult,
   AuditApplyRequest,
   AuditApplyResult,
+  AuditExportRequest,
+  AuditExportResult,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -210,11 +214,222 @@ Promise<{ problems: string[]; findings: AuditFinding[] }> {
 }
 
 /** The audit_write tool definition. */
-const auditWriteToolDescription = 'Record audit findings after analyzing a document. MUST be called when the user asks to audit/review a document. Each finding cites a specific location with a quoted anchor and a replacement suggestion. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing or ambiguous rejects the whole call, so fix the anchor and call again. For more than 3 findings write a temporary JSON file (e.g. /tmp/findings.json) with Python json.dump and pass findingsFile instead of hand-writing the inline array: long inline arrays drop required fields and waste retries.'
+const auditWriteToolDescription = 'Record audit findings after analyzing a document. MUST be called when the user asks to audit/review a document. Each finding cites a specific location with a quoted anchor and a replacement suggestion. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing or ambiguous rejects the whole call, so fix the anchor and call again. For more than 3 findings write a temporary JSON file named after the document (e.g. /tmp/findings-<name>.json) with Python json.dump and pass findingsFile instead of hand-writing the inline array: long inline arrays drop required fields and waste retries, and a reused generic name collides with leftovers from an earlier session and trips the read-before-write guard.'
+
+/**
+ * The document converter audit_convert_document runs. It emits the exact HTML the review panel
+ * renders (headings, paragraphs, lists, bordered tables) plus one plain-text line per paragraph
+ * or table row — the line structure anchor.line and the highlight linkage rely on. Double quotes
+ * only: the tool embeds the script in a single-quoted shell word. Paths arrive as argv so no
+ * quoting can break.
+ */
+const convertScript = [
+  'import html as H, os, sys',
+  'import docx',
+  'from docx.document import Document as _Doc',
+  'from docx.oxml.table import CT_Tbl',
+  'from docx.oxml.text.paragraph import CT_P',
+  'from docx.table import Table',
+  'from docx.text.paragraph import Paragraph',
+  'SRC, OUT_HTML, OUT_TXT = sys.argv[2], sys.argv[3], sys.argv[4]  # argv[1] is the -- separator',
+  'os.makedirs(os.path.dirname(OUT_HTML) or ".", exist_ok=True)',
+  'def iter_block_items(parent):',
+  '    parent_elm = parent.element.body if isinstance(parent, _Doc) else parent._tc',
+  '    for child in parent_elm.iterchildren():',
+  '        if isinstance(child, CT_P):',
+  '            yield Paragraph(child, parent)',
+  '        elif isinstance(child, CT_Tbl):',
+  '            yield Table(child, parent)',
+  'def esc(s):',
+  '    return H.escape(s, quote=False)',
+  'doc = docx.Document(SRC)',
+  'def para_html(p):',
+  '    style = p.style.name if p.style is not None else ""',
+  '    txt = p.text',
+  '    if not txt.strip():',
+  '        return None',
+  '    if style.startswith("Heading 1"):',
+  '        return f"<h1>{esc(txt)}</h1>"',
+  '    if style.startswith("Heading 2"):',
+  '        return f"<h2>{esc(txt)}</h2>"',
+  '    if style.startswith("Heading"):',
+  '        return f"<h3>{esc(txt)}</h3>"',
+  '    if style.startswith("List"):',
+  '        return f"<li>{esc(txt)}</li>"',
+  '    return f"<p>{esc(txt)}</p>"',
+  'def cell_html(c):',
+  '    return "<td>" + "<br>".join(esc(x) for x in c.text.split("\\n")) + "</td>"',
+  'def table_html(tbl):',
+  '    rows = []',
+  '    for r in tbl.rows:',
+  '        cells = "".join(cell_html(c) for c in r.cells)',
+  '        rows.append("<tr>" + cells + "</tr>")',
+  '    return "<table>" + "".join(rows) + "</table>"',
+  'body = []',
+  'text = []',
+  'for block in iter_block_items(doc):',
+  '    if isinstance(block, Paragraph):',
+  '        h = para_html(block)',
+  '        if h:',
+  '            body.append(h)',
+  '        if block.text.strip():',
+  '            text.append(block.text)',
+  '    elif isinstance(block, Table):',
+  '        body.append(table_html(block))',
+  '        for r in block.rows:',
+  '            cells = [c.text.replace("\\n", " ") for c in r.cells]',
+  '            text.append(" | ".join(cells))',
+  '        text.append("")',
+  'html_doc = ("<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><style>"',
+  '            "body{font-family:sans-serif;margin:2em;max-width:960px;line-height:1.6}"',
+  '            "table{border-collapse:collapse;margin:1em 0}"',
+  '            "td,th{border:1px solid #999;padding:6px 10px;vertical-align:top}"',
+  '            "h1{font-size:22px}h2{font-size:18px}h3{font-size:16px}"',
+  '            "</style></head><body>" + "\\n".join(body) + "</body></html>")',
+  'with open(OUT_HTML, "w", encoding="utf-8") as f:',
+  '    f.write(html_doc)',
+  'with open(OUT_TXT, "w", encoding="utf-8") as f:',
+  '    f.write("\\n".join(text))',
+  'print("LINES", len(text))',
+].join('\n')
+
+/**
+ * The document exporter the `exportDocument` remote runs: rewrites the original .docx so it holds
+ * the round's accepted findings. Quotes and replacements arrive as argv pairs; a quote no
+ * paragraph holds is counted as skipped instead of failing the export. Each replacement inherits
+ * the formatting of the run its quote started in, and a replacement that empties its paragraph
+ * removes the paragraph, matching the text file's whole-line deletion.
+ */
+const exportScript = [
+  'import os, sys',
+  'import docx',
+  'from docx.document import Document as _Doc',
+  'from docx.oxml.table import CT_Tbl',
+  'from docx.oxml.text.paragraph import CT_P',
+  'from docx.table import Table',
+  'from docx.text.paragraph import Paragraph',
+  'SRC, OUT = sys.argv[2], sys.argv[3]  # argv[1] is the -- separator',
+  'PAIRS = sys.argv[4:]  # quote replacement quote replacement ...',
+  'os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)',
+  'def iter_paragraphs(parent):',
+  '    parent_elm = parent.element.body if isinstance(parent, _Doc) else parent._tc',
+  '    for child in parent_elm.iterchildren():',
+  '        if isinstance(child, CT_P):',
+  '            yield Paragraph(child, parent)',
+  '        elif isinstance(child, CT_Tbl):',
+  '            tbl = Table(child, parent)',
+  '            for row in tbl.rows:',
+  '                for cell in row.cells:',
+  '                    yield from iter_paragraphs(cell)',
+  'doc = docx.Document(SRC)',
+  'paras = list(iter_paragraphs(doc))',
+  'applied = 0',
+  'skipped = 0',
+  'for i in range(0, len(PAIRS), 2):',
+  '    quote, repl = PAIRS[i], PAIRS[i + 1]',
+  '    done = False',
+  '    for p in paras:',
+  '        runs = p.runs',
+  '        full = "".join(r.text for r in runs)',
+  '        at = full.find(quote)',
+  '        if at == -1:',
+  '            continue',
+  '        end = at + len(quote)',
+  '        pos = 0',
+  '        first = True',
+  '        for r in runs:',
+  '            s, e = pos, pos + len(r.text)',
+  '            pos = e',
+  '            lo, hi = max(at, s), min(end, e)',
+  '            if lo >= hi:',
+  '                continue',
+  '            head, tail = r.text[:lo - s], r.text[hi - s:]',
+  '            if first:',
+  '                r.text = head + repl + tail',
+  '                first = False',
+  '            else:',
+  '                r.text = head + tail',
+  '        if repl == "" and p.text.strip() == "":',
+  '            p._element.getparent().remove(p._element)',
+  '        applied += 1',
+  '        done = True',
+  '        break',
+  '    if not done:',
+  '        skipped += 1',
+  'doc.save(OUT)',
+  'print(f"APPLIED {applied} SKIPPED {skipped}")',
+].join('\n')
+
+/**
+ * Quote one shell word with single quotes; the script and paths carry no restrictions then.
+ * @param value - Raw word to embed in a POSIX command line.
+ * @returns the quoted word.
+ */
+function shellWord(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+/**
+ * The audit_convert_document tool: one call replaces the write-converter/run/read chain the
+ * guidance used to teach, so naming collisions, retyped quotes, and attribute guards stop being
+ * per-session model work.
+ * @param ctx - Host context carrying the filesystem, shell, and sandbox-policy services.
+ * @returns the registered tool definition.
+ */
+function createAuditConvertTool(ctx: Context) {
+  return defineTool({
+    name: 'audit_convert_document',
+    description: 'Convert a .docx document into the two audit workspace files in one call: work/<name>.html (formatted preview the review panel renders) and work/<name>.txt (plain text, one paragraph or table row per line — the audit anchor source). MUST be used instead of writing a converter; write your own python-docx converter under /tmp only when this tool fails.',
+    parameters: {
+      documentPath: { type: 'string', required: true, description: 'Path of the original document to convert (the file the user uploaded or specified).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          htmlPath: { type: 'string', required: true },
+          textPath: { type: 'string', required: true },
+          textLines: { type: 'integer', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text' as const,
+        text: `Converted to ${value.htmlPath} and ${value.textPath} (${value.textLines} lines).`,
+      }],
+    },
+    async execute(args: { documentPath: string }, exec) {
+      const session = exec.agent?.session
+      if (session === undefined) throw new Error('audit_convert_document: no active session')
+      const cwd = session.header.cwd
+      if (cwd === undefined) throw new Error('audit_convert_document: the session has no working directory')
+      const src = await ctx.fs.resolve(args.documentPath, { cwd })
+      const base = basename(src.displayPath).replace(/\.docx$/i, '')
+      const htmlPath = `work/${base}.html`
+      const textPath = `work/${base}.txt`
+      const command = `python3 -c ${shellWord(convertScript)} -- ${shellWord(src.displayPath)} ${shellWord(htmlPath)} ${shellWord(textPath)}`
+      const result = await ctx.shell.run(ctx.shell.resolve({
+        command,
+        workdir: cwd,
+        timeoutMs: 120_000,
+        stdoutMaxBytes: 4096,
+        sandboxPolicy: ctx.sandboxPolicy.resolve({ session }),
+        signal: exec.signal,
+      }))
+      if (result.aborted) throw new Error('audit_convert_document: aborted')
+      if (result.exitCode !== 0) {
+        throw new Error(`audit_convert_document: python failed (exit ${result.exitCode ?? 'killed'}): ${result.stderr.text.slice(-400).trim()}`)
+      }
+      const textLines = Number(/LINES (\d+)/.exec(result.stdout.text)?.[1] ?? 0)
+      return { htmlPath, textPath, textLines }
+    },
+  })
+}
 
 /**
  * Problems in one parsed findings file, element by element: file content skips the tool schema's
- * argument validation, so the same required fields are checked here.
+ * argument validation, so the same required fields are checked here. An empty replacement stays
+ * valid — it is the line-deletion form the tool description documents.
  * @param value - Parsed JSON the findings file held.
  * @returns one message per unusable element; empty when the array is usable.
  */
@@ -228,9 +443,10 @@ function fileFindingProblems(value: unknown): string[] {
       return
     }
     const entries = record as Record<string, unknown>
-    for (const field of ['id', 'issue', 'replacement'] as const) {
+    for (const field of ['id', 'issue'] as const) {
       if (typeof entries[field] !== 'string' || entries[field] === '') problems.push(`${at}.${field} is missing or empty`)
     }
+    if (typeof entries.replacement !== 'string') problems.push(`${at}.replacement is missing or not a string`)
     if (entries.title !== undefined && typeof entries.title !== 'string') problems.push(`${at}.title is not a string`)
     const anchor = entries.anchor
     if (typeof anchor !== 'object' || anchor === null) {
@@ -297,7 +513,7 @@ function createAuditWriteTool(ctx: Context) {
       documentPath: { type: 'string', required: true, description: 'Path to the original document being audited (the file the user uploaded or specified).' },
       findings: {
         type: 'array',
-        description: 'Inline findings; reliable up to 3. For more, write a temporary JSON file (e.g. /tmp/findings.json) with Python json.dump and pass findingsFile instead. Ignored when findingsFile is set.',
+        description: 'Inline findings; reliable up to 3. For more, write a temporary JSON file named after the document (e.g. /tmp/findings-<name>.json) with Python json.dump and pass findingsFile instead. Ignored when findingsFile is set.',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -358,7 +574,7 @@ const applyBases = new Map<string, { round: number; base: string }>()
 
 /** Remote service for user decisions on audit findings. */
 export class AuditReviewService extends TypertRemoteService {
-  static inject = ['sessions', 'sessionProjections', 'fs', 'tools', 'systemPrompt', 'sandboxPolicy']
+  static inject = ['sessions', 'sessionProjections', 'fs', 'tools', 'systemPrompt', 'sandboxPolicy', 'shell']
 
   constructor(ctx: Context) {
     super(ctx, 'auditReview')
@@ -367,6 +583,7 @@ export class AuditReviewService extends TypertRemoteService {
   protected [Service.init](): void {
     registerProjection(this.ctx)
     this.ctx.tools.register(createAuditWriteTool(this.ctx))
+    this.ctx.tools.register(createAuditConvertTool(this.ctx))
     this.ctx.systemPrompt.section({
       name: 'audit-review:guidance',
       order: 100,
@@ -374,27 +591,20 @@ export class AuditReviewService extends TypertRemoteService {
 
 When the user asks to audit or review a document:
 
-## Step 1: Generate HTML preview and text extraction
-Before auditing, convert the document to HTML for preview and plain text for quoting:
-1. Write the converter script and every intermediate file under the system temporary directory (e.g. \`/tmp\`), never inside the workspace — the only new workspace files are the two outputs below
-2. Use python-docx to read the document: call the \`load_workspace_dependencies\` tool when it is available and otherwise use the configured Python environment; when writing the converter, guard every optional attribute: \`paragraph.style\` and \`paragraph.alignment\` are \`None\` for paragraphs without explicit formatting, so read them as \`p.style.name if p.style is not None else ''\` — an unguarded \`block.style.name\` crashes the whole conversion
-3. Generate an HTML file preserving structure (paragraphs, tables, headings, lists)
-   - Save as \`work/<name>.html\` (same base name as the text file)
-4. Extract plain text from the HTML (strip tags, preserve line breaks)
-   - Save as \`work/<name>.txt\`
-5. The HTML file enables formatted preview; the text file is the audit source
+## Step 1: Convert the document (one call)
+Call \`audit_convert_document\` with the original document path; it writes \`work/<name>.html\` (formatted preview) and \`work/<name>.txt\` (plain text, one paragraph or table row per line — the audit anchor source) in one call. Only when the tool fails may you write your own converter with python-docx under \`/tmp\` with a name unique to this document, guarding every optional attribute (\`paragraph.style\` and \`paragraph.alignment\` are \`None\` without explicit formatting: read \`p.style.name if p.style is not None else ''\`).
 
 ## Step 2: Audit the document
 1. Read the plain text file (\`work/<name>.txt\`) for analysis
 2. Call \`audit_write\` to record all findings
-   - With 3 or fewer findings pass them inline; with more, build the array in Python and \`json.dump\` it to a temporary file (e.g. \`/tmp/findings.json\`), then pass \`findingsFile\` — hand-written long inline arrays drop required fields and every drop rejects the whole call
+   - With 3 or fewer findings pass them inline; with more, build the array in Python by slicing the quote for each finding straight out of the text file — never retype quotes by hand, full-width lookalikes break the verbatim match — and \`json.dump\` it to a temporary file named after the document (e.g. \`/tmp/findings-<name>.json\`), then pass \`findingsFile\`
    - \`anchor.path\` MUST point to the text file (\`work/<name>.txt\`)
    - \`anchor.line\` MUST be the 1-based line that contains the quote
    - \`anchor.quote\` MUST be copied verbatim and appear exactly once in the file; extend it with surrounding words when a short quote repeats
    - \`issue\` MUST start with [高风险], [中风险] or [低风险]
    - \`replacement\` MUST replace exactly the quoted span and read as correct prose afterwards; set it to the empty string to delete the whole line, never to instructions or notes
    - \`documentPath\` is the original document path
-3. After calling the tool, reply with ONLY this one line: "审计完成，共 N 条发现，请查看审查卡片。"
+3. The moment \`audit_write\` succeeds, reply with ONLY this one line and make no further tool calls in between — background archiving never delays the reply: "审计完成，共 N 条发现，请查看审查卡片。"
 4. NEVER output findings as text, tables, or lists - the card displays them
 5. NEVER explain your analysis process or reasoning
 6. NEVER list, link, or present the generated files and NEVER call the file-presentation tool - the review card already carries the review and download actions
@@ -470,6 +680,55 @@ Before auditing, convert the document to HTML for preview and plain text for quo
     // differ from the deployment fallback root.
     await this.ctx.fs.writeText(target, rendered.text, undefined, undefined, this.ctx.sandboxPolicy.resolve({ session }))
     return { ok: true }
+  }
+
+  /**
+   * Write the original document back out with the round's accepted findings applied, so the review
+   * card's download carries the edits to the file the user uploaded. Quotes and replacements
+   * travel as shell-quoted argv pairs and the original upload is never modified.
+   * @param request - session and round whose accepted findings to apply.
+   * @returns the exported file's download name and workspace path, or the failure to report.
+   */
+  @Remote('exportDocument')
+  async exportDocument(request: AuditExportRequest): Promise<AuditExportResult> {
+    const session = this.ctx.sessions.get(request.sessionId)
+    if (session === undefined) {
+      return { ok: false, error: { code: 'session-not-found', message: `no live session '${request.sessionId}'` } }
+    }
+    const state = this.ctx.sessionProjections.stateOf(session, 'audit')
+    if (state === undefined || state.round !== request.round) {
+      return { ok: false, error: { code: 'stale-round', message: `exportDocument names round ${request.round} but the session's current audit round is ${state?.round ?? 'none'}` } }
+    }
+    const cwd = session.header.cwd
+    if (cwd === undefined) {
+      return { ok: false, error: { code: 'no-working-directory', message: 'the session has no working directory' } }
+    }
+    const source = await this.ctx.fs.resolve(state.documentPath, { cwd })
+    if (!/\.docx$/i.test(source.displayPath)) {
+      return { ok: false, error: { code: 'unsupported-format', message: `cannot export "${state.documentPath}": only .docx documents are supported` } }
+    }
+    const base = basename(source.displayPath).replace(/\.docx$/i, '')
+    const filename = `${base}（修改后）.docx`
+    const out = `work/${filename}`
+    const accepted = state.findings.filter(f => state.decisions[f.id] === 'accept')
+    const pairs = accepted.flatMap(f => [f.anchor.quote, f.replacement])
+    const command = `python3 -c ${shellWord(exportScript)} -- ${shellWord(source.displayPath)} ${shellWord(out)}`
+      + pairs.map(pair => ` ${shellWord(pair)}`).join('')
+    const result = await this.ctx.shell.run(this.ctx.shell.resolve({
+      command,
+      workdir: cwd,
+      timeoutMs: 120_000,
+      stdoutMaxBytes: 4096,
+      sandboxPolicy: this.ctx.sandboxPolicy.resolve({ session }),
+    }))
+    if (result.aborted) {
+      return { ok: false, error: { code: 'export-aborted', message: 'the export was aborted' } }
+    }
+    if (result.exitCode !== 0) {
+      return { ok: false, error: { code: 'export-failed', message: `python failed (exit ${result.exitCode ?? 'killed'}): ${result.stderr.text.slice(-400).trim()}` } }
+    }
+    const counts = /APPLIED (\d+) SKIPPED (\d+)/.exec(result.stdout.text)
+    return { ok: true, value: { path: out, filename, applied: Number(counts?.[1] ?? 0), skipped: Number(counts?.[2] ?? 0) } }
   }
 }
 

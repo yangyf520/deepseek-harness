@@ -92,3 +92,17 @@ export interface AuditApplyRequest {
 export type AuditApplyResult =
   | { ok: true }
   | { ok: false; error: { code: string; message: string } }
+
+/**
+ * Request to export the audited document itself with the round's accepted findings applied; the
+ * original upload is never modified.
+ */
+export interface AuditExportRequest {
+  readonly sessionId: SessionId
+  readonly round: number
+}
+
+/** Result of exporting the edited document: its download name, workspace path, and outcome counts. */
+export type AuditExportResult =
+  | { ok: true; value: { path: string; filename: string; applied: number; skipped: number } }
+  | { ok: false; error: { code: string; message: string } }
