@@ -76,6 +76,7 @@
 
     - id: plugin-package-inventory-deepseek
       name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+      disabled: true
 
     # The transport-independent default for Agents created by entry points.
     # Settings may supply a saved selection; consumers read it at creation time.
@@ -83,7 +84,7 @@
       name: '@deepseek-ai/dsh-agent-default-model'
       config:
         provider: deepseek-official
-        model: deepseek-flash
+        model: deepseek-v4-flash
 
     - id: jobs
       name: '@deepseek-ai/dsh-jobs-local'
@@ -526,3 +527,30 @@
     # choice.
     - id: llm-deepseek
       name: '@deepseek-ai/dsh-llm-deepseek'
+      config:
+        models:
+          - id: deepseek-v4-flash
+            name: DeepSeek-V4-Flash
+            contextWindow: 128000
+            inputModalities: [text, image]
+            systemPromptUpdate: in-history
+          - id: deepseek-v4-flash-max
+            name: DeepSeek-V4-Flash-Max
+            contextWindow: 128000
+            inputModalities: [text, image]
+            systemPromptUpdate: in-history
+          - id: deepseek-v4-pro
+            name: DeepSeek-V4-Pro
+            description: Stronger agentic coding and reasoning
+            contextWindow: 128000
+          - id: deepseek-v4-pro-max
+            name: DeepSeek-V4-Pro-Max
+            description: Highest quality DeepSeek reasoning
+            contextWindow: 128000
+          - id: qwen3.7-max
+            name: Qwen3.7-Max
+            contextWindow: 128000
+          - id: qwen3-vl-plus
+            name: Qwen3-VL-Plus
+            contextWindow: 128000
+            inputModalities: [text, image]
