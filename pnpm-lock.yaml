@@ -1577,6 +1577,37 @@ importers:
         specifier: workspace:*
         version: link:../../util/home-paths
 
+  packages/audit/audit-review:
+    dependencies:
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../core/tools
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-fs':
+        specifier: workspace:*
+        version: link:../../fs/fs
+      '@deepseek-ai/dsh-sandbox-policy':
+        specifier: workspace:*
+        version: link:../../sandbox/sandbox-policy
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:*
+        version: link:../../session/session-projection
+      '@deepseek-ai/dsh-shell':
+        specifier: workspace:*
+        version: link:../../shell/shell
+
   packages/boot/app-boot:
     dependencies:
       '@deepseek-ai/dsh-package-manifest':
@@ -2317,6 +2348,9 @@ importers:
       '@deepseek-ai/dsh-app-boot':
         specifier: workspace:*
         version: link:../../boot/app-boot
+      '@deepseek-ai/dsh-audit-review':
+        specifier: workspace:*
+        version: link:../../audit/audit-review
       '@deepseek-ai/dsh-client-connection':
         specifier: workspace:*
         version: link:../../client/connection
@@ -2344,6 +2378,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-attachment':
         specifier: workspace:*
         version: link:../../client/ui-attachment
+      '@deepseek-ai/dsh-client-ui-audit-review':
+        specifier: workspace:*
+        version: link:../../client/ui-audit-review
       '@deepseek-ai/dsh-client-ui-brand-official':
         specifier: workspace:*
         version: link:../../client/ui-brand-official
@@ -3033,6 +3070,60 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
+
+  packages/client/ui-audit-review:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-api-remotes':
+        specifier: workspace:*
+        version: link:../../api/remotes
+      '@deepseek-ai/dsh-api-session-controller':
+        specifier: workspace:*
+        version: link:../../api/session-controller
+      '@deepseek-ai/dsh-api-workspace-files':
+        specifier: workspace:*
+        version: link:../../api/workspace-files
+      '@deepseek-ai/dsh-audit-review':
+        specifier: workspace:*
+        version: link:../../audit/audit-review
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:*
+        version: link:../connection
+      '@deepseek-ai/dsh-client-locale':
+        specifier: workspace:*
+        version: link:../locale
+      '@deepseek-ai/dsh-client-ui-chat':
+        specifier: workspace:*
+        version: link:../ui-chat
+      '@deepseek-ai/dsh-client-ui-conversation':
+        specifier: workspace:*
+        version: link:../ui-conversation
+      '@deepseek-ai/dsh-client-ui-renderer':
+        specifier: workspace:*
+        version: link:../ui-renderer
+      '@deepseek-ai/dsh-client-ui-session':
+        specifier: workspace:*
+        version: link:../ui-session
+      '@deepseek-ai/dsh-client-ui-sidebar-right':
+        specifier: workspace:*
+        version: link:../ui-sidebar-right
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: workspace:*
+        version: link:../ui-slots
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../core/session
+      '@types/react':
+        specifier: ~18.3.1
+        version: 18.3.31
+      docx-preview:
+        specifier: ^0.4.0
+        version: 0.4.1
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
 
   packages/client/ui-brand-official:
     devDependencies:
@@ -18148,6 +18239,9 @@ packages:
   dmg-builder@26.15.3:
     resolution: {integrity: sha512-O3zJUFUYHJKgzPqioHxfxzBzlSC1eXCSr79gMSBKBP5AgjjpmrydMsMLotEg9fAJF36vdUncb+4ndRNxoPdlSQ==}
 
+  docx-preview@0.4.1:
+    resolution: {integrity: sha512-Dv4g+LeE0swHpPvNC0lAT0YsR5Zq5pAxw7d3vHQ8EChBLgIrqqe9VPL5nVt2HBJap8bEZbXUI0TJob7kBeNU9w==}
+
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
 
@@ -18683,9 +18777,13 @@ packages:
     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
+  glob@7.2.0:
+    resolution: {integrity: sha512-lmLf6gtyrPq8tTjSmrO94wBeQbFR3HbLHbuyD69wuyQkImp2hWqMGB47OX65FBkPffO641IP9jWa1z4ivqG26Q==}
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
-    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+    deprecated: Glob versions prior to v9 are no longer supported
 
   global-agent@3.0.0:
     resolution: {integrity: sha512-PT6XReJ+D07JvGoxQMkT6qji/jVNfX/h364XHZOWeRzy64sSFr+xJ5OX7LI3b4MPQzdL4H8Y8M0xzPpsVMwA8Q==}
@@ -19127,6 +19225,9 @@ packages:
 
   jszip@3.10.1:
     resolution: {integrity: sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g==}
+
+  jszip@3.10.2:
+    resolution: {integrity: sha512-3l+rb15IOWtUhU0H5MFqES/T6Kh7abYwjosBey/vD6hDt8zoEffkSC5Ws5SGtgVw3gBx2NEbhTeSW1+kWkpyTQ==}
 
   jwa@2.0.1:
     resolution: {integrity: sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg==}
@@ -25360,6 +25461,10 @@ snapshots:
       - electron-builder-squirrel-windows
       - supports-color
 
+  docx-preview@0.4.1:
+    dependencies:
+      jszip: 3.10.2
+
   dom-accessibility-api@0.5.16: {}
 
   dompurify@3.4.11:
@@ -26097,6 +26202,15 @@ snapshots:
       package-json-from-dist: 1.0.1
       path-scurry: 1.11.1
 
+  glob@7.2.0:
+    dependencies:
+      fs.realpath: 1.0.0
+      inflight: 1.0.6
+      inherits: 2.0.4
+      minimatch: 3.1.5
+      once: 1.4.0
+      path-is-absolute: 1.0.1
+
   glob@7.2.3:
     dependencies:
       fs.realpath: 1.0.0
@@ -26545,6 +26659,13 @@ snapshots:
   jsx-ast-utils-x@0.1.0: {}
 
   jszip@3.10.1:
+    dependencies:
+      lie: 3.3.0
+      pako: 1.0.11
+      readable-stream: 2.3.8
+      setimmediate: 1.0.5
+
+  jszip@3.10.2:
     dependencies:
       lie: 3.3.0
       pako: 1.0.11
@@ -27830,7 +27951,7 @@ snapshots:
 
   rimraf@2.6.3:
     dependencies:
-      glob: 7.2.3
+      glob: 7.2.0
 
   roarr@2.15.4:
     dependencies:

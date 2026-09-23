@@ -1,0 +1,234 @@
+/**
+ * Audit review react components: overview card and turn-tail wrapper.
+ * @module
+ */
+
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { AuditExportResult, AuditFinding, AuditState } from '@deepseek-ai/dsh-audit-review/types'
+import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ReadFileBytes } from './ReviewPanel.tsx'
+import { splitBasis } from './regulation.ts'
+
+// The projection state and its findings are the Host types, so a card and the Host fold never drift.
+export type { AuditFinding, AuditState }
+
+/** Severity level for color coding. */
+export type Severity = 'high' | 'medium' | 'low'
+
+/** Color map for severity badges. */
+export const SEVERITY_COLOR: Record<Severity, string> = {
+  high: '#b91c1c',
+  medium: '#b45309',
+  low: '#047857',
+}
+
+/** Light severity backgrounds for cards and document highlights. */
+export const SEVERITY_BG: Record<Severity, string> = {
+  high: '#fee2e2',
+  medium: '#fef3c7',
+  low: '#d1fae5',
+}
+
+/** The level prefix `audit_write` requires at the start of every issue. */
+const LEVEL_PREFIX = /^\s*[【[]\s*(高|中|低)风险\s*[】\]]\s*/
+
+/** A finding's issue split into its declared severity and the prose shown to users. */
+export interface ParsedIssue {
+  severity: Severity
+  /** Issue prose with the level prefix removed. */
+  text: string
+}
+
+/**
+ * Read a finding's severity from the level prefix the audit tool requires and strip that
+ * prefix from the prose, so the level never depends on incidental characters.
+ * @param issue - Raw issue text recorded by `audit_write`.
+ * @returns the declared severity and the display prose.
+ */
+export function parseIssue(issue: string): ParsedIssue {
+  const match = LEVEL_PREFIX.exec(issue)
+  if (match === null) return { severity: inferSeverity(issue), text: issue }
+  const text = issue.slice(match[0].length)
+  if (match[1] === '高') return { severity: 'high', text }
+  if (match[1] === '中') return { severity: 'medium', text }
+  return { severity: 'low', text }
+}
+
+/**
+ * Keyword fallback for issues recorded before the level prefix was required.
+ * @param issue - Raw issue text.
+ * @returns the inferred severity.
+ */
+function inferSeverity(issue: string): Severity {
+  if (/安全|泄露|越权|丢失|高风险|严重/.test(issue)) return 'high'
+  if (/矛盾|不一致|冲突|缺失|为空|未定义|未提及|不衔接|遗漏/.test(issue)) return 'medium'
+  return 'low'
+}
+
+/**
+ * One-line label the overview rows and the panel card headers both show: the title `audit_write`
+ * recorded, or the first sentence of the issue prose clipped to a header-sized label.
+ * @param finding - Finding as the audit projection records it.
+ * @returns the finding's display label.
+ */
+export function findingSummary(finding: AuditFinding): string {
+  if (finding.title !== undefined && finding.title !== '') return finding.title
+  const first = (parseIssue(finding.issue).text.match(/[^。！？!?\n]+/)?.[0] ?? finding.issue).trim()
+  return first.length > 20 ? `${first.slice(0, 20)}…` : first
+}
+
+/** Severity order in the review list: most severe first. */
+const SEVERITY_RANK: Record<Severity, number> = { high: 0, medium: 1, low: 2 }
+
+/**
+ * Order one round's findings for review: the findings that rest on a regulation come first, then
+ * the most severe. A finding rests on a regulation when its issue carries a citation, as the review
+ * panel's basis line does. Findings that tie keep the order the audit recorded them in.
+ * @param findings - Findings as the audit projection records them.
+ * @returns the same findings, in review order.
+ */
+export function orderFindings(findings: readonly AuditFinding[]): AuditFinding[] {
+  const ranked = findings.map((finding) => {
+    const parsed = parseIssue(finding.issue)
+    return {
+      finding,
+      restsOnRegulation: splitBasis(parsed.text).citations.length > 0,
+      severity: SEVERITY_RANK[parsed.severity],
+    }
+  })
+  ranked.sort((left, right) => {
+    if (left.restsOnRegulation !== right.restsOnRegulation) return left.restsOnRegulation ? -1 : 1
+    return left.severity - right.severity
+  })
+  return ranked.map(entry => entry.finding)
+}
+
+/** Overview card props. */
+interface AuditOverviewProps {
+  state: AuditState
+  onOpenReview: () => void
+  onDownload: () => void
+  t: TranslateNS<'audit'>
+}
+
+/** Overview card showing summary and finding list. */
+export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditOverviewProps) {
+  const findings = orderFindings(state.findings)
+  const severities = findings.map(f => parseIssue(f.issue).severity)
+  const highCount = severities.filter(s => s === 'high').length
+  const mediumCount = severities.filter(s => s === 'medium').length
+  const lowCount = severities.filter(s => s === 'low').length
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px',
+      border: '1px solid rgb(234, 236, 240)', borderRadius: '6px',
+    }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: '12px' }}>{t('overview.title')}</strong>
+        <span style={{ fontSize: '11px', color: 'rgb(102, 112, 133)' }}>
+          {findings.length} {t('overview.findings')}
+        </span>
+        {highCount > 0 && (
+          <span style={{ fontSize: '11px', color: SEVERITY_COLOR.high }}>
+            {t('severity.high')} {highCount}
+          </span>
+        )}
+        {mediumCount > 0 && (
+          <span style={{ fontSize: '11px', color: SEVERITY_COLOR.medium }}>
+            {t('severity.medium')} {mediumCount}
+          </span>
+        )}
+        {lowCount > 0 && (
+          <span style={{ fontSize: '11px', color: SEVERITY_COLOR.low }}>
+            {t('severity.low')} {lowCount}
+          </span>
+        )}
+      </div>
+      {findings.slice(0, 3).map((finding, i) => {
+        const severity = parseIssue(finding.issue).severity
+        return (
+          <div key={finding.id} style={{
+            display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', cursor: 'pointer',
+          }}>
+            <span style={{
+              minWidth: '20px', textAlign: 'center',
+              background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
+              borderRadius: '999px', fontSize: '10px', padding: '1px 5px', fontWeight: 600,
+            }}>{i + 1}</span>
+            <span style={{
+              background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
+              borderRadius: '4px', fontSize: '10px', padding: '0 5px',
+            }}>{t(`severity.${severity}`)}</span>
+            <span style={{
+              flex: '1 1 0%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{findingSummary(finding)}</span>
+          </div>
+        )
+      })}
+      {findings.length > 3 && (
+        <div style={{ fontSize: '11px', color: 'rgb(23, 92, 211)', cursor: 'pointer' }}
+          onClick={onOpenReview}>
+          +{findings.length - 3} {t('overview.more')}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button type="button" onClick={onOpenReview} style={{
+          fontSize: '12px', cursor: 'pointer',
+          background: 'rgb(23, 92, 211)', border: 'none', color: 'rgb(255, 255, 255)',
+          borderRadius: '6px', padding: '4px 12px',
+        }}>{t('overview.openReview')}</button>
+        <button type="button" onClick={onDownload} style={{
+          fontSize: '12px', cursor: 'pointer',
+          background: 'white', border: '1px solid rgb(234, 236, 240)', color: 'rgb(102, 112, 133)',
+          borderRadius: '6px', padding: '4px 12px',
+        }}>{t('overview.download')}</button>
+      </div>
+    </div>
+  )
+}
+
+/** Turn-tail card wrapper props. */
+export type AuditTurnTailProps =
+  PropsRuntime<'conversation.chat.turnTail'>
+  & PropsLocale<'audit'>
+  & {
+    openSidebar: (address: string) => void
+    readFileBytes: ReadFileBytes
+    exportDocument: (sessionId: SessionId, round: number) => Promise<AuditExportResult>
+  }
+
+/** Turn-tail entry point. */
+export function AuditTurnTail({ sessionId, useProjection, openSidebar, readFileBytes, exportDocument, t }: AuditTurnTailProps) {
+  const state = useProjection('audit')
+  if (!state || state.round === 0 || state.findings.length === 0) return null
+
+  const handleOpenReview = () => {
+    openSidebar(`dsh-resource://audit/${sessionId}`)
+  }
+
+  const handleDownload = () => {
+    // The exported .docx is the uploaded document with the accepted findings applied, so the
+    // download keeps the original format instead of serving the plain-text audit source.
+    void exportDocument(sessionId, state.round).then(async (result) => {
+      if (!result.ok) {
+        console.error('audit export failed:', result.error.message)
+        return
+      }
+      if (result.value.skipped > 0) {
+        console.warn(`audit export skipped ${result.value.skipped} finding(s) whose quote does not match the document`)
+      }
+      const bytes = await readFileBytes(sessionId, result.value.path)
+      const url = URL.createObjectURL(new Blob([bytes]))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = result.value.filename
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    }).catch((error: unknown) => {
+      console.error('audit download failed:', error)
+    })
+  }
+
+  return <AuditOverviewCard state={state} onOpenReview={handleOpenReview} onDownload={handleDownload} t={t} />
+}
