@@ -400,6 +400,9 @@
     - id: timeout-policy
       name: '@deepseek-ai/dsh-tool-call-timeout-policy'
 
+    - id: git-guard
+      name: '@deepseek-ai/dsh-git-guard'
+
     - id: spill-local
       name: '@deepseek-ai/dsh-spill-local'
 
