@@ -50,6 +50,10 @@ allowBuilds:
   electron-winstaller: false
   # Store-index rewriting only needs msgpackr's portable JavaScript codec.
   msgpackr-extract: false
+  # SQLite native binding compiles a C++ addon; required for the database tool.
+  better-sqlite3: true
+  # Oracle driver downloads precompiled native binaries at install time.
+  oracledb: true
 
 minimumReleaseAgeExclude:
   # Office engines and their API are qualified and released together by the kit repository.

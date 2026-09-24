@@ -495,6 +495,10 @@
     - id: mcp-resources
       name: '@deepseek-ai/dsh-mcp-resources'
 
+    # Database query tools: auto-skips when DATABASE_URL is not set.
+    - id: tool-db
+      name: '@deepseek-ai/dsh-tool-db'
+
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 
     # The tool registry. Presentation mode is a deployment choice; omitting it here
