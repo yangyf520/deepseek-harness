@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src https: data:; font-src https: data:; connect-src https:; worker-src https: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'">
+  <title>{{TITLE}}</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" integrity="sha384-Mx5lkUEQPM1pOJCwFtUICyX45KNojXbkWdYhkKUKsbv391mavbfoAmONbzkgYPzR" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5; color: #1a1a2e;
+      padding: 24px; max-width: 1200px; margin: 0 auto; line-height: 1.6;
+    }
+    h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+    .subtitle { color: #888; margin-bottom: 20px; font-size: 14px; }
+    .card {
+      background: #fff; border-radius: 12px; padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 16px;
+    }
+    .card h2 {
+      font-size: 15px; font-weight: 600; margin-bottom: 14px;
+      padding-left: 10px; border-left: 3px solid #4f46e5;
+    }
+    .section { margin-bottom: 32px; }
+    .section .charts { margin-bottom: 0; }
+    .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi { text-align: center; padding: 20px 16px; }
+    .kpi .num { font-size: 30px; font-weight: 700; color: #4f46e5; white-space: nowrap; }
+    .kpi .label { font-size: 13px; color: #888; margin-top: 6px; }
+    .kpi .sub { font-size: 12px; color: #94a3b8; margin-top: 3px; }
+    .kpi .warn { color: #d32f2f; }
+    .kpi .good { color: #2e7d32; }
+    .filter-bar { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
+    .filter-bar label { font-size: 13px; color: #888; margin-right: 4px; }
+    .filter-bar select, .filter-bar input {
+      padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 8px;
+      font-size: 13px; background: #fff; color: #1a1a2e; cursor: pointer;
+    }
+    .charts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+    .chart-box { width: 100%; height: 350px; }
+    .hint { font-size: 12px; color: #94a3b8; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0e0e0; line-height: 1.5; }
+    .card table { width: 100%; margin: -4px -8px; }
+    .table-search { margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
+    .table-search input {
+      flex: 1; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 8px;
+      font-size: 13px; background: #fff; color: #1a1a2e;
+    }
+    .table-search input:focus { outline: none; border-color: #4f46e5; }
+    .row-counter { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      text-align: left; padding: 10px 12px; background: #1a1a2e; color: #fff;
+      font-weight: 500; position: sticky; top: 0; cursor: pointer; user-select: none;
+    }
+    th:hover { background: #4f46e5; }
+    th[data-sort="asc"]::after { content: ' ▲'; font-size: 10px; opacity: 0.8; }
+    th[data-sort="desc"]::after { content: ' ▼'; font-size: 10px; opacity: 0.8; }
+    td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    .table-empty { text-align: center; padding: 24px 12px; color: #94a3b8; font-size: 13px; display: none; }
+    .recommendations ul, .summary-card ul { list-style: decimal; padding-left: 20px; }
+    .recommendations li, .summary-card li { padding: 8px 0; font-size: 14px; line-height: 1.6; }
+    .alert { background: #fff3f3; border: 1px solid #ffcccc; border-radius: 8px; padding: 12px 16px; margin: 10px 0; font-size: 13px; }
+    .alert strong { color: #d32f2f; }
+    .footer-actions { display: flex; justify-content: flex-end; margin-top: 32px; padding-top: 20px; border-top: 1px solid #e0e0e0; }
+    .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; }
+    .btn-primary { background: #4f46e5; color: #fff; }
+    .btn-primary:hover { background: #4338ca; }
+    @media (max-width: 768px) {
+      body { padding: 16px; }
+      .charts { grid-template-columns: 1fr; }
+      .kpi-row { grid-template-columns: repeat(2, 1fr); }
+      h1 { font-size: 22px; }
+      .chart-box { height: 280px; }
+    }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .card { box-shadow: none; border: 1px solid #eee; }
+      .footer-actions { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <h1>{{TITLE}}</h1>
+  <div class="subtitle">{{SUBTITLE}}</div>
+  {{SUMMARY}}
+  <div class="kpi-row">{{KPI_ROW}}</div>
+  {{FILTER_BAR}}
+  <div id="report-content">{{CHART_CARDS}}{{TABLE_CARD}}{{RECOMMENDATIONS}}</div>
+  <div class="footer-actions">
+    <button class="btn btn-primary" onclick="window.print()">导出 PDF</button>
+  </div>
+  <script>
+    const _charts = [];
+    const _waldenPalette = ['#5470c6','#91cc75','#fac858','#ee6666','#73c0de','#3ba272','#fc8452','#9a60b4'];
+    function registerChart(id, option) {
+      const chart = echarts.init(document.getElementById(id), 'walden');
+      const types = new Set((option.series || []).map(s => s.type));
+      const isAxis = ['bar','line','scatter','candlestick','boxplot'].some(t => types.has(t));
+      // Auto-color single-series bar charts: each bar gets a distinct palette color
+      const barSeries = (option.series || []).filter(s => s.type === 'bar');
+      if (barSeries.length === 1 && !barSeries[0].itemStyle?.color) {
+        barSeries[0].colorBy = 'data';
+        barSeries[0].itemStyle = { ...barSeries[0].itemStyle, color: (p) => _waldenPalette[p.dataIndex % _waldenPalette.length] };
+      }
+      if (!option.tooltip) option.tooltip = isAxis ? { trigger: 'axis', axisPointer: { type: 'cross' } } : { trigger: 'item' };
+      if (option.legend === undefined && (option.series || []).length > 1) option.legend = { top: 0 };
+      if (!option.toolbox) option.toolbox = { feature: { saveAsImage: {}, dataView: {}, restore: {} }, right: 10 };
+      const len = Math.max(...(option.series || []).map(s => (s.data || []).length), 0);
+      if (isAxis && len >= 5 && !option.dataZoom) option.dataZoom = [{ type: 'inside' }, { type: 'slider', height: 20, bottom: 5 }];
+      chart.setOption(option);
+      _charts.push(chart);
+    }
+    function initSortable(table) {
+      let sortCol = -1, sortAsc = true;
+      table.querySelector('thead').addEventListener('click', e => {
+        const th = e.target.closest('th'); if (!th) return;
+        const idx = [...th.parentNode.children].indexOf(th);
+        if (sortCol === idx) sortAsc = !sortAsc; else { sortCol = idx; sortAsc = true; }
+        const rows = [...table.querySelectorAll('tbody tr')];
+        rows.sort((a, b) => {
+          const av = a.children[idx]?.textContent.trim() || '', bv = b.children[idx]?.textContent.trim() || '';
+          const an = parseFloat(av.replace(/[,，%万]/g, '')), bn = parseFloat(bv.replace(/[,，%万]/g, ''));
+          return (sortAsc ? 1 : -1) * (!isNaN(an) && !isNaN(bn) ? an - bn : av.localeCompare(bv, 'zh'));
+        });
+        const tbody = table.querySelector('tbody');
+        rows.forEach(r => tbody.appendChild(r));
+        table.querySelectorAll('th').forEach(h => h.dataset.sort = '');
+        th.dataset.sort = sortAsc ? 'asc' : 'desc';
+        const si = table.closest('.card')?.querySelector('.table-search input');
+        if (si) updateRowCounter(si);
+      });
+    }
+    function normalizeLayout() {
+      const area = document.getElementById('report-content'); if (!area) return;
+      const allCards = [];
+      [...area.children].forEach(c => {
+        if (c.classList?.contains('card')) allCards.push(c);
+        else if (c.querySelectorAll) c.querySelectorAll('.card').forEach(x => allCards.push(x));
+      });
+      if (!allCards.length) return;
+      const chartCards = allCards.filter(c => c.querySelector('.chart-box'));
+      const otherCards = allCards.filter(c => !c.querySelector('.chart-box'));
+      area.innerHTML = '';
+      for (let i = 0; i < chartCards.length; i += 2) {
+        const sec = document.createElement('div'); sec.className = 'section';
+        const grid = document.createElement('div'); grid.className = 'charts';
+        grid.appendChild(chartCards[i]);
+        if (i + 1 < chartCards.length) grid.appendChild(chartCards[i + 1]);
+        else { chartCards[i].style.maxWidth = '50%'; chartCards[i].style.margin = '0 auto'; }
+        sec.appendChild(grid); area.appendChild(sec);
+      }
+      otherCards.forEach(c => {
+        if (c.querySelector('table')) { c.style.gridColumn = '1 / -1'; c.style.width = '100%'; }
+        area.appendChild(c);
+      });
+    }
+    normalizeLayout();
+    {{CHART_SCRIPTS}}
+    window.addEventListener('resize', () => _charts.forEach(c => c.resize()));
+    function updateRowCounter(input) {
+      const counter = input.parentElement.querySelector('.row-counter'); if (!counter) return;
+      const table = input.closest('.card').querySelector('table'); if (!table) return;
+      const visible = [...table.querySelectorAll('tbody tr')].filter(r => r.style.display !== 'none').length;
+      counter.textContent = visible + ' / ' + table.querySelectorAll('tbody tr').length + ' 行';
+      const empty = table.querySelector('.table-empty');
+      if (empty) empty.style.display = visible === 0 ? '' : 'none';
+    }
+    document.querySelectorAll('.table-search input').forEach(input => {
+      input.addEventListener('input', e => {
+        const q = e.target.value.toLowerCase();
+        const table = e.target.closest('.card').querySelector('table'); if (!table) return;
+        table.querySelectorAll('tbody tr').forEach(row => { row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+        updateRowCounter(e.target);
+      });
+    });
+    document.querySelectorAll('.card table').forEach(initSortable);
+  </script>
+</body>
+</html>
