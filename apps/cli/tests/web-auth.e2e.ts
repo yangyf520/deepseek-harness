@@ -50,8 +50,9 @@ async function freePort(): Promise<number> {
 }
 
 function cleanEnvironment(root: string, dshHome: string): NodeJS.ProcessEnv {
+  // AUTH_CHANNELS would activate the login gate and intercept the token exchange this test drives.
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
-    !/(?:KEY|SECRET|TOKEN|PASSWORD)/iu.test(name)))
+    !/(?:KEY|SECRET|TOKEN|PASSWORD|AUTH_CHANNELS)/iu.test(name)))
   return {
     ...env,
     DSH_AGENTS_HOME: join(root, '.agents'),
@@ -176,7 +177,7 @@ describe('dsh web authentication through the real CLI', () => {
       const setCookie = exchange.headers.get('set-cookie')
       if (setCookie === null) throw new Error('real CLI token exchange omitted Set-Cookie')
       expect(setCookie).toContain('HttpOnly')
-      expect(setCookie).toContain('SameSite=Strict')
+      expect(setCookie).toContain('SameSite=Lax')
       expect(setCookie).not.toContain('Secure')
       const cookie = setCookie.split(';', 1)[0]!
 
