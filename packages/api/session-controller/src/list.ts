@@ -24,6 +24,19 @@ const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
+/**
+ * Apply the tenant session filter registered on globalThis, if any.
+ * Without a filter every record passes through (single-user mode).
+ * @param records - Persisted Session records from the query provider.
+ * @returns the filtered subset visible to the current request.
+ */
+function filterSessionRecords(records: SessionRecord[]): SessionRecord[] {
+  const filter = (globalThis as Record<string, unknown>).__dshSessionFilter as
+    | ((records: SessionRecord[]) => SessionRecord[])
+    | undefined
+  return filter !== undefined ? filter(records) : records
+}
+
 const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
   lastPromptAt: z.number().nullable(),
@@ -131,7 +144,8 @@ export class ApiSessionList {
    */
   async list(signal?: AbortSignal): Promise<SessionSummary[]> {
     signal?.throwIfAborted()
-    const records = await this.ctx.sessionQuery.listSessions(signal)
+    const allRecords = await this.ctx.sessionQuery.listSessions(signal)
+    const records = filterSessionRecords(allRecords)
     signal?.throwIfAborted()
     const items: SessionSummary[] = []
     const cold: SessionRecord[] = []
@@ -198,7 +212,7 @@ export class ApiSessionList {
       )
     }
     try {
-      const visible = await provider.listSessions(signal)
+      const visible = filterSessionRecords(await provider.listSessions(signal))
       signal.throwIfAborted()
       const visibleIds = new Set(visible
         .filter(record => record.header.cwd !== undefined)

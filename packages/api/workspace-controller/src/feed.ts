@@ -19,6 +19,19 @@ import type {
 type WorkspaceFeedFrame = Exclude<WorkspaceFollowFrame, { readonly type: 'replace' }>
 
 /**
+ * Apply the tenant workspace filter registered on globalThis, if any.
+ * Without a filter every view passes through (single-user mode).
+ * @param views - Workspace views from the authoritative registry.
+ * @returns the filtered subset visible to the current request.
+ */
+function filterWorkspaceViews(views: WorkspaceView[]): WorkspaceView[] {
+  const filter = (globalThis as Record<string, unknown>).__dshWorkspaceFilter as
+    | ((views: WorkspaceView[]) => WorkspaceView[])
+    | undefined
+  return filter !== undefined ? filter(views) : views
+}
+
+/**
  * Project one authoritative Workspace entity into its Remote value.
  * @param workspace - authoritative registry entity.
  * @returns detached Workspace projection for Remote consumers.
@@ -74,7 +87,7 @@ export class WorkspaceFeed {
    */
   baseline(): WorkspaceBaseline {
     return {
-      items: this.ctx.workspaceRegistry.list().map(workspaceView),
+      items: filterWorkspaceViews(this.ctx.workspaceRegistry.list().map(workspaceView)),
       archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
       pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds],
     }
@@ -135,9 +148,12 @@ export class WorkspaceFeed {
       return
     }
     if (!this.knownIds.has(change.key)) return
+    const view = changedWorkspaceView(change.key, change.value)
+    const visible = filterWorkspaceViews([view])
+    if (visible.length === 0) return
     this.publish({
       type: 'upsert',
-      workspace: changedWorkspaceView(change.key, change.value),
+      workspace: view,
     })
   }
 
