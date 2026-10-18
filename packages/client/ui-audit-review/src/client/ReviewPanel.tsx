@@ -50,19 +50,6 @@ function alignToCard(scroller: HTMLElement, target: HTMLElement, card: HTMLEleme
   scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: 'smooth' })
 }
 
-/** Replace a finding's quote with its suggested text, keeping the severity background. */
-function replaceQuote(container: HTMLElement, finding: AuditFinding, severity: Severity): HTMLElement | null {
-  const marks = markQuote(container, finding.anchor.quote, severity)
-  const first = marks[0]
-  if (first === undefined) return null
-  applyEdit(marks, finding.anchor.quote, finding.replacement)
-  for (const mark of marks) {
-    mark.dataset.auditReplaced = finding.id
-    delete mark.dataset.auditHighlight
-  }
-  return first
-}
-
 /** Length of the leading run both texts share. */
 function commonPrefix(left: string, right: string): number {
   let length = 0
@@ -109,9 +96,22 @@ function applyEdit(marks: readonly HTMLElement[], quote: string, replacement: st
 /** Insert every accepted finding's replacement into a freshly rendered document. */
 function applyAccepted(container: HTMLElement, findings: readonly AuditFinding[], decisions: AuditState['decisions']): void {
   const applied = new Set(Array.from(container.querySelectorAll<HTMLElement>('mark[data-audit-replaced]')).map(mark => mark.dataset.auditReplaced))
+  // Two-pass: first locate all quotes against the original DOM without mutating it,
+  // then apply edits. This prevents earlier mark insertions from shifting text-node
+  // boundaries and breaking later quote matches.
+  const pending: { finding: AuditFinding; marks: HTMLElement[] }[] = []
   for (const finding of findings) {
     if (decisions[finding.id] !== 'accept' || applied.has(finding.id)) continue
-    replaceQuote(container, finding, parseIssue(finding.issue).severity)
+    const marks = markQuote(container, finding.anchor.quote, parseIssue(finding.issue).severity)
+    if (marks.length > 0) pending.push({ finding, marks })
+  }
+  // Now apply edits — the marks already exist in the DOM from the first pass.
+  for (const { finding, marks } of pending) {
+    applyEdit(marks, finding.anchor.quote, finding.replacement)
+    for (const mark of marks) {
+      mark.dataset.auditReplaced = finding.id
+      delete mark.dataset.auditHighlight
+    }
   }
 }
 
@@ -633,7 +633,6 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
     const failLoad = (error: unknown): void => {
       setDocError({ key: 'preview.loadFailed', message: error instanceof Error ? error.message : String(error) })
     }
-    // The anchor's own rendering: as HTML when the anchor is one, as escaped text otherwise.
     const showAnchor = (): void => {
       if (BINARY_EXTENSIONS.test(anchorPath)) {
         setDocError({ key: 'preview.binary' })
@@ -647,16 +646,13 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
         .catch(failLoad)
     }
 
-    // Try loading the HTML version first
     if (htmlPath === null || htmlPath === anchorPath) {
-      // No HTML derivation possible, render anchor.path directly
       showAnchor()
       return
     }
     readFileBytes(sessionId, htmlPath)
       .then(bytes => setDocHtml(DOCUMENT_STYLES + new TextDecoder().decode(bytes)))
       .catch(() => {
-        // HTML not available, fall back to plain text if anchor is a text file
         if (BINARY_EXTENSIONS.test(anchorPath)) {
           setDocError({ key: 'preview.noHtml' })
           return
@@ -730,6 +726,8 @@ export function ReviewPanel({ sessionId, useProjection, readFileBytes, t, onDeci
       setUnlocated(false)
       return
     }
+    // Always reset to the original HTML: markQuote inserts <mark> elements that
+    // split text nodes, so a second pass must start from the unmodified DOM.
     container.innerHTML = docHtml
     show(container)
   }, [selectionKey, docHtml, activeView, docxReady, state])
