@@ -7,6 +7,8 @@
 
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
@@ -650,10 +652,17 @@ export class WorkspaceRegistry extends Service {
   private async bootstrap(headers: readonly SessionHeader[]): Promise<void> {
     const table = this.requireTable()
     const state = this.requireState()
+    // In multi-tenant mode (OAuth configured), only bootstrap workspaces within
+    // the tenant root — historical sessions from single-user mode must not leak in.
+    const multiTenant = process.env.OAUTH_APP_ID !== undefined || process.env.AUTH_CHANNELS !== undefined
+    const tenantRoot = multiTenant
+      ? resolve(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'users')
+      : undefined
     const groupsByPath = new Map<string, SessionHeader[]>()
     for (const header of headers) {
       const path = this.sessionPaths.get(header.id)
       if (path === undefined) continue
+      if (tenantRoot !== undefined && !resolve(path).startsWith(tenantRoot + '/')) continue
       const group = groupsByPath.get(path)
       if (group === undefined) groupsByPath.set(path, [header])
       else group.push(header)
