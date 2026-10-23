@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src https: data:; font-src https: data:; connect-src https:; worker-src https: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'">
-  <title>{{CHART_TITLE}}</title>
+  <title id="page-title">图表</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" integrity="sha384-Mx5lkUEQPM1pOJCwFtUICyX45KNojXbkWdYhkKUKsbv391mavbfoAmONbzkgYPzR" crossorigin="anonymous"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -18,24 +18,45 @@
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>{{CHART_TITLE}}</h2>
-    <div class="chart-box" id="{{CHART_ID}}"></div>
-    <div class="hint">{{HINT}}</div>
-  </div>
+  <div id="app"></div>
   <script>
-    (function() {
-      const option = {{CHART_OPTION}};
+    // ===== DATA INJECTION POINT =====
+    // The model replaces this line with actual chart data JSON.
+    // DO NOT modify any other part of this file.
+    const CHART_DATA = null; // <-- REPLACE WITH: { title, id, option, hint }
+    // ===== END DATA INJECTION POINT =====
+
+    const _waldenPalette = ['#5470c6','#91cc75','#fac858','#ee6666','#73c0de','#3ba272','#fc8452','#9a60b4'];
+
+    function renderChart(data) {
+      if (!data) { document.getElementById('app').innerHTML = '<p style="color:#d32f2f;padding:40px;text-align:center;">图表数据缺失</p>'; return; }
+      const cid = data.id || 'chart-0';
+      document.getElementById('page-title').textContent = data.title || '图表';
+
+      const app = document.getElementById('app');
+      app.innerHTML = `<div class="card"><h2>${esc(data.title || '')}</h2><div class="chart-box" id="${cid}"></div>${data.hint ? `<div class="hint">${esc(data.hint)}</div>` : ''}</div>`;
+
+      const option = data.option || {};
       const types = new Set((option.series || []).map(s => s.type));
       const isAxis = ['bar','line','scatter','candlestick','boxplot'].some(t => types.has(t));
+      const barSeries = (option.series || []).filter(s => s.type === 'bar');
+      if (barSeries.length === 1 && !barSeries[0].itemStyle?.color) {
+        barSeries[0].colorBy = 'data';
+        barSeries[0].itemStyle = { ...barSeries[0].itemStyle, color: (p) => _waldenPalette[p.dataIndex % _waldenPalette.length] };
+      }
       if (!option.tooltip) option.tooltip = isAxis ? { trigger: 'axis', axisPointer: { type: 'cross' } } : { trigger: 'item' };
-      if (!option.toolbox) option.toolbox = { feature: { saveAsImage: {}, dataView: {}, restore: {} }, right: 10 };
+      if (!option.toolbox) option.toolbox = { feature: { saveAsImage: { pixelRatio: 2 }, restore: {} }, right: 10, iconStyle: { borderColor: '#666' } };
       const len = Math.max(...(option.series || []).map(s => (s.data || []).length), 0);
       if (isAxis && len >= 5 && !option.dataZoom) option.dataZoom = [{ type: 'inside' }, { type: 'slider', height: 20, bottom: 5 }];
-      const chart = echarts.init(document.getElementById('{{CHART_ID}}'), 'walden');
+
+      const chart = echarts.init(document.getElementById(cid), 'walden');
       chart.setOption(option);
       window.addEventListener('resize', () => chart.resize());
-    })();
+    }
+
+    function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    if (CHART_DATA) renderChart(CHART_DATA);
   </script>
 </body>
 </html>

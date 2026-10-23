@@ -4,39 +4,51 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; connect-src https:; worker-src https: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'">
-  <title>{{TITLE}}</title>
+  <title id="page-title">报表</title>
   <script src="https://unpkg.com/echarts@5.5.1/dist/echarts.min.js" onerror="this.src='https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js'"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
+    :root {
+      --primary: #1677ff;
+      --bg: #f0f2f5;
+      --text: #1a1a2e;
+      --card-bg: #fff;
+      --muted: #888;
+      --muted-light: #94a3b8;
+      --border: #e0e0e0;
+      --good: #2e7d32;
+      --warn: #d32f2f;
+      --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: #f0f2f5; color: #1a1a2e;
+      font-family: var(--font);
+      background: var(--bg); color: var(--text);
       padding: 24px; max-width: 1400px; margin: 0 auto; line-height: 1.6;
     }
     h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
-    .subtitle { color: #888; margin-bottom: 20px; font-size: 14px; }
+    .subtitle { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
     .card {
-      background: #fff; border-radius: 12px; padding: 20px;
+      background: var(--card-bg); border-radius: 12px; padding: 20px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     }
     .card h2 {
       font-size: 15px; font-weight: 600; margin-bottom: 14px;
-      padding-left: 10px; border-left: 3px solid #4f46e5;
+      padding-left: 10px; border-left: 3px solid var(--primary);
     }
     .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .kpi { text-align: center; padding: 20px 16px; }
-    .kpi .num { font-size: 30px; font-weight: 700; color: #4f46e5; white-space: nowrap; }
-    .kpi .label { font-size: 13px; color: #888; margin-top: 6px; }
-    .kpi .sub { font-size: 12px; color: #94a3b8; margin-top: 3px; }
-    .kpi .warn { color: #d32f2f; }
-    .kpi .good { color: #2e7d32; }
+    .kpi .num { font-size: 30px; font-weight: 700; color: var(--primary); white-space: nowrap; }
+    .kpi .label { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .kpi .sub { font-size: 12px; color: var(--muted-light); margin-top: 3px; }
+    .kpi .warn { color: var(--warn); }
+    .kpi .good { color: var(--good); }
     .filter-bar { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
-    .filter-bar label { font-size: 13px; color: #888; margin-right: 4px; }
+    .filter-bar label { font-size: 13px; color: var(--muted); margin-right: 4px; }
     .filter-bar select, .filter-bar input {
-      padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 8px;
-      font-size: 13px; background: #fff; color: #1a1a2e; cursor: pointer;
+      padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: 13px; background: var(--card-bg); color: var(--text); cursor: pointer;
     }
-    /* Core layout: auto-fit adapts to any container width and any card count */
     .chart-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
@@ -44,37 +56,39 @@
       margin-bottom: 24px;
     }
     .chart-box { width: 100%; height: 340px; }
-    .hint { font-size: 12px; color: #94a3b8; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0e0e0; line-height: 1.5; }
-    /* Non-chart cards (tables, recommendations) always full-width */
+    .hint { font-size: 12px; color: var(--muted-light); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); line-height: 1.5; }
     .full-width { grid-column: 1 / -1; }
     .card table { width: 100%; margin: -4px -8px; }
     .table-search { margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
     .table-search input {
-      flex: 1; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 8px;
-      font-size: 13px; background: #fff; color: #1a1a2e;
+      flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: 13px; background: var(--card-bg); color: var(--text);
     }
-    .table-search input:focus { outline: none; border-color: #4f46e5; }
-    .row-counter { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .table-search input:focus { outline: none; border-color: var(--primary); }
+    .row-counter { font-size: 12px; color: var(--muted-light); white-space: nowrap; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th {
-      text-align: left; padding: 10px 12px; background: #1a1a2e; color: #fff;
+      text-align: left; padding: 10px 12px; background: var(--text); color: var(--card-bg);
       font-weight: 500; position: sticky; top: 0; cursor: pointer; user-select: none;
     }
-    th:hover { background: #4f46e5; }
+    th:hover { background: var(--primary); }
     th[data-sort="asc"]::after { content: ' ▲'; font-size: 10px; opacity: 0.8; }
     th[data-sort="desc"]::after { content: ' ▼'; font-size: 10px; opacity: 0.8; }
-    td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; }
-    tr:nth-child(even) td { background: #f8fafc; }
-    .table-empty { text-align: center; padding: 24px 12px; color: #94a3b8; font-size: 13px; display: none; }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    tr:nth-child(even) td { background: var(--bg); }
+    .table-empty { text-align: center; padding: 24px 12px; color: var(--muted-light); font-size: 13px; display: none; }
     .recommendations ul, .summary-card ul { list-style: decimal; padding-left: 20px; }
     .summary-card { margin-bottom: 24px; }
     .recommendations li, .summary-card li { padding: 8px 0; font-size: 14px; line-height: 1.6; }
     .alert { background: #fff3f3; border: 1px solid #ffcccc; border-radius: 8px; padding: 12px 16px; margin: 10px 0; font-size: 13px; }
-    .alert strong { color: #d32f2f; }
+    .alert strong { color: var(--warn); }
     .footer-actions { display: flex; justify-content: flex-end; margin-top: 32px; padding-top: 20px; border-top: 1px solid #e0e0e0; }
     .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; }
-    .btn-primary { background: #4f46e5; color: #fff; }
-    .btn-primary:hover { background: #4338ca; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { opacity: 0.9; }
+    .drill-down { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); overflow-x: auto; }
+    .drill-down table { font-size: 12px; }
+    .drill-down td { padding: 6px 8px; }
     @media (max-width: 768px) {
       body { padding: 16px; }
       .chart-grid { grid-template-columns: 1fr; }
@@ -91,20 +105,21 @@
   </style>
 </head>
 <body>
-  <h1>{{TITLE}}</h1>
-  <div class="subtitle">{{SUBTITLE}}</div>
-  {{SUMMARY}}
-  <div class="kpi-row">{{KPI_ROW}}</div>
-  {{FILTER_BAR}}
-  <div id="report-content" class="chart-grid">{{CHART_CARDS}}{{TABLE_CARD}}{{RECOMMENDATIONS}}</div>
-  <div class="footer-actions">
-    <button class="btn btn-primary" onclick="exportPDF()">导出 PDF</button>
-  </div>
+  <div id="app"></div>
   <script>
+    // ===== DATA INJECTION POINT =====
+    // The model replaces this entire script block with actual report data.
+    // DO NOT modify any other part of this file.
+    const REPORT_DATA = null; // <-- REPLACE THIS LINE WITH ACTUAL JSON DATA
+    // ===== END DATA INJECTION POINT =====
+
     const _charts = [];
     const _waldenPalette = ['#5470c6','#91cc75','#fac858','#ee6666','#73c0de','#3ba272','#fc8452','#9a60b4'];
-    function registerChart(id, option) {
-      const chart = echarts.init(document.getElementById(id), 'walden');
+
+    function registerChart(id, option, detail) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const chart = echarts.init(el, 'walden');
       const types = new Set((option.series || []).map(s => s.type));
       const isAxis = ['bar','line','scatter','candlestick','boxplot'].some(t => types.has(t));
       const barSeries = (option.series || []).filter(s => s.type === 'bar');
@@ -114,12 +129,163 @@
       }
       if (!option.tooltip) option.tooltip = isAxis ? { trigger: 'axis', axisPointer: { type: 'cross' } } : { trigger: 'item' };
       if (option.legend === undefined && (option.series || []).length > 1) option.legend = { top: 0 };
-      if (!option.toolbox) option.toolbox = { feature: { saveAsImage: { pixelRatio: 2 }, restore: {} }, right: 10, iconStyle: { borderColor: '#666' }, emphasis: { iconStyle: { borderColor: '#4f46e5' } } };
+      if (!option.toolbox) option.toolbox = { feature: { saveAsImage: { pixelRatio: 2 }, restore: {}, dataView: { readOnly: true, lang: ['数据视图', '关闭', ''] } }, right: 10, iconStyle: { borderColor: '#666' }, emphasis: { iconStyle: { borderColor: getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#4f46e5' } } };
       const len = Math.max(...(option.series || []).map(s => (s.data || []).length), 0);
       if (isAxis && len >= 5 && !option.dataZoom) option.dataZoom = [{ type: 'inside' }, { type: 'slider', height: 20, bottom: 5 }];
       chart.setOption(option);
+      // Drill-down: click chart to toggle detail table
+      if (detail && detail.columns && detail.rows) {
+        chart.on('click', () => toggleDrillDown(id, detail));
+        el.style.cursor = 'pointer';
+        el.title = '点击查看明细';
+      }
       _charts.push(chart);
     }
+
+    function toggleDrillDown(chartId, detail) {
+      let panel = document.getElementById('drill-' + chartId);
+      if (panel) { panel.remove(); return; }
+      const card = document.getElementById(chartId)?.closest('.chart-card');
+      if (!card) return;
+      panel = document.createElement('div');
+      panel.id = 'drill-' + chartId;
+      panel.className = 'drill-down';
+      let h = '<table><thead><tr>';
+      detail.columns.forEach(c => { h += `<th>${esc(c)}</th>`; });
+      h += '</tr></thead><tbody>';
+      detail.rows.forEach(row => {
+        h += '<tr>';
+        detail.columns.forEach((_, ci) => { h += `<td>${esc(String(row[ci] ?? ''))}</td>`; });
+        h += '</tr>';
+      });
+      h += '</tbody></table>';
+      panel.innerHTML = h;
+      card.appendChild(panel);
+    }
+
+    function applyTheme(theme) {
+      if (!theme) return;
+      const root = document.documentElement;
+      if (theme.primary) root.style.setProperty('--primary', theme.primary);
+      if (theme.bg) root.style.setProperty('--bg', theme.bg);
+      if (theme.text) root.style.setProperty('--text', theme.text);
+      if (theme.cardBg) root.style.setProperty('--card-bg', theme.cardBg);
+      if (theme.muted) root.style.setProperty('--muted', theme.muted);
+      if (theme.mutedLight) root.style.setProperty('--muted-light', theme.mutedLight);
+      if (theme.border) root.style.setProperty('--border', theme.border);
+      if (theme.good) root.style.setProperty('--good', theme.good);
+      if (theme.warn) root.style.setProperty('--warn', theme.warn);
+      if (theme.font) root.style.setProperty('--font', theme.font);
+      if (theme.palette) { _waldenPalette.length = 0; _waldenPalette.push(...theme.palette); }
+    }
+
+    function renderReport(data) {
+      if (!data) { document.getElementById('app').innerHTML = '<p style="color:#d32f2f;padding:40px;text-align:center;">报表数据缺失 — REPORT_DATA 为 null</p>'; return; }
+      applyTheme(data.theme);
+      const app = document.getElementById('app');
+      document.getElementById('page-title').textContent = data.title || '报表';
+
+      let html = '';
+      html += `<h1>${esc(data.title || '')}</h1>`;
+      html += `<div class="subtitle">${esc(data.subtitle || '')}</div>`;
+
+      // Summary card
+      if (data.summary && data.summary.length) {
+        html += '<div class="card summary-card"><h2>核心结论</h2><ul>';
+        data.summary.forEach(s => { html += `<li>${esc(s)}</li>`; });
+        html += '</ul></div>';
+      }
+
+      // KPI row
+      if (data.kpis && data.kpis.length) {
+        html += '<div class="kpi-row">';
+        data.kpis.forEach(k => {
+          const cls = k.trend && k.trend.startsWith('↓') ? 'warn' : (k.trend && k.trend.startsWith('↑') ? 'good' : '');
+          html += `<div class="card kpi"><div class="num ${cls}">${esc(String(k.value))}</div><div class="label">${esc(k.label)}</div>`;
+          if (k.sub) html += `<div class="sub">${esc(k.sub)}</div>`;
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      // Filter bar (optional)
+      if (data.filters && data.filters.length) {
+        html += '<div class="filter-bar">';
+        data.filters.forEach(f => {
+          if (f.type === 'select') {
+            html += `<label>${esc(f.label)}</label><select id="filter-${f.id}">`;
+            (f.options || []).forEach(o => { html += `<option value="${esc(o.value)}">${esc(o.label)}</option>`; });
+            html += '</select>';
+          } else if (f.type === 'date') {
+            html += `<label>${esc(f.label)}</label><input type="date" id="filter-${f.id}">`;
+          }
+        });
+        html += '</div>';
+      }
+
+      // Chart cards + table + recommendations in one grid
+      html += '<div id="report-content" class="chart-grid">';
+
+      // Charts
+      if (data.charts && data.charts.length) {
+        data.charts.forEach((c, i) => {
+          const cid = c.id || ('chart-' + i);
+          html += `<div class="card chart-card"><h2>${esc(c.title)}</h2><div class="chart-box" id="${cid}"></div>`;
+          if (c.hint) html += `<div class="hint">${esc(c.hint)}</div>`;
+          html += '</div>';
+        });
+      }
+
+      // Table
+      if (data.table) {
+        html += '<div class="card full-width"><h2>' + esc(data.table.title || '') + '</h2>';
+        html += '<div class="table-search"><input type="text" placeholder="搜索..."><span class="row-counter"></span></div>';
+        html += '<table><thead><tr>';
+        (data.table.columns || []).forEach(col => { html += `<th>${esc(col)}</th>`; });
+        html += '</tr></thead><tbody>';
+        (data.table.rows || []).forEach(row => {
+          html += '<tr>';
+          (data.table.columns || []).forEach((_, ci) => { html += `<td>${esc(String(row[ci] ?? ''))}</td>`; });
+          html += '</tr>';
+        });
+        html += '</tbody></table><div class="table-empty">无匹配数据</div></div>';
+      }
+
+      // Recommendations
+      if (data.recommendations && data.recommendations.length) {
+        html += '<div class="card recommendations full-width"><h2>行动建议</h2><ul>';
+        data.recommendations.forEach(r => { html += `<li>${esc(r)}</li>`; });
+        html += '</ul></div>';
+      }
+
+      html += '</div>'; // close chart-grid
+
+      // Footer
+      html += '<div class="footer-actions"><button class="btn btn-primary" onclick="exportExcel()">导出 Excel</button><button class="btn btn-primary" onclick="exportPDF()" style="margin-left:8px">导出 PDF</button></div>';
+
+      app.innerHTML = html;
+
+      // Initialize charts after DOM is ready
+      setTimeout(() => {
+        if (data.charts) {
+          data.charts.forEach((c, i) => {
+            const cid = c.id || ('chart-' + i);
+            registerChart(cid, c.option || {}, c.detail);
+          });
+        }
+        initTableFeatures();
+        normalizeLayout();
+        if (_charts.length > 1) echarts.connect(_charts);
+        const ro = new ResizeObserver(() => _charts.forEach(c => c.resize()));
+        const rc = document.getElementById('report-content');
+        if (rc) ro.observe(rc);
+      }, 50);
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     function initSortable(table) {
       let sortCol = -1, sortAsc = true;
       table.querySelector('thead').addEventListener('click', e => {
@@ -140,18 +306,14 @@
         if (si) updateRowCounter(si);
       });
     }
-    // Minimal layout normalization: just mark non-chart cards as full-width
+
     function normalizeLayout() {
       const area = document.getElementById('report-content'); if (!area) return;
       area.querySelectorAll('.card').forEach(c => {
         if (!c.querySelector('.chart-box')) c.classList.add('full-width');
       });
     }
-    normalizeLayout();
-    {{CHART_SCRIPTS}}
-    // ResizeObserver: precisely resize charts when their container changes
-    const _ro = new ResizeObserver(() => _charts.forEach(c => c.resize()));
-    _ro.observe(document.getElementById('report-content'));
+
     function updateRowCounter(input) {
       const counter = input.parentElement.querySelector('.row-counter'); if (!counter) return;
       const table = input.closest('.card').querySelector('table'); if (!table) return;
@@ -160,15 +322,19 @@
       const empty = table.querySelector('.table-empty');
       if (empty) empty.style.display = visible === 0 ? '' : 'none';
     }
-    document.querySelectorAll('.table-search input').forEach(input => {
-      input.addEventListener('input', e => {
-        const q = e.target.value.toLowerCase();
-        const table = e.target.closest('.card').querySelector('table'); if (!table) return;
-        table.querySelectorAll('tbody tr').forEach(row => { row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none'; });
-        updateRowCounter(e.target);
+
+    function initTableFeatures() {
+      document.querySelectorAll('.table-search input').forEach(input => {
+        input.addEventListener('input', e => {
+          const q = e.target.value.toLowerCase();
+          const table = e.target.closest('.card').querySelector('table'); if (!table) return;
+          table.querySelectorAll('tbody tr').forEach(row => { row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+          updateRowCounter(e.target);
+        });
       });
-    });
-    document.querySelectorAll('.card table').forEach(initSortable);
+      document.querySelectorAll('.card table').forEach(initSortable);
+    }
+
     function exportPDF() {
       const states = _charts.map(c => {
         const opt = c.getOption();
@@ -187,6 +353,36 @@
         });
       }, 500); }, 300);
     }
+
+    function exportExcel() {
+      if (typeof XLSX === 'undefined') { alert('Excel 库未加载'); return; }
+      const wb = XLSX.utils.book_new();
+      const data = REPORT_DATA;
+      if (data.kpis && data.kpis.length) {
+        const ws = XLSX.utils.aoa_to_sheet([['指标', '数值', '备注'], ...data.kpis.map(k => [k.label, k.value, k.sub || ''])]);
+        XLSX.utils.book_append_sheet(wb, ws, 'KPI');
+      }
+      if (data.table && data.table.rows && data.table.rows.length) {
+        const ws = XLSX.utils.aoa_to_sheet([data.table.columns, ...data.table.rows]);
+        XLSX.utils.book_append_sheet(wb, ws, safeSheetName(data.table.title || '明细'));
+      }
+      if (data.charts) {
+        data.charts.forEach((c, i) => {
+          if (c.detail && c.detail.rows && c.detail.rows.length) {
+            const ws = XLSX.utils.aoa_to_sheet([c.detail.columns, ...c.detail.rows]);
+            XLSX.utils.book_append_sheet(wb, ws, safeSheetName(c.title || ('图表' + (i + 1))));
+          }
+        });
+      }
+      XLSX.writeFile(wb, (data.title || '报表') + '.xlsx');
+    }
+
+    function safeSheetName(name) {
+      return String(name).replace(/[\/\\*?\[\]:]/g, '_').slice(0, 31);
+    }
+
+    // Auto-render if data is present
+    if (REPORT_DATA) renderReport(REPORT_DATA);
   </script>
 </body>
 </html>
