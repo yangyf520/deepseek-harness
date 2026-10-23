@@ -18,10 +18,29 @@ description: '当用户要求报表、报告、数据分析、dashboard、复盘
 数据来源由用户决定：用户在对话中提供了数据（文件、表格、API 返回）就直接用；没提供就问用户数据从哪来。不要自行搜索工作区文件或猜测数据源。绝不编造数字。
 
 **取数策略（当数据来自 MCP/API 时）：**
-1. **批量拉取原始数据**：用 `entity-search` 一次性拉取所需实体的原始记录（pageSize 设大，如 200-500），不要对每个分析维度单独调 `entity-aggregate`。
-2. **本地分析**：拿到原始数据后，用 Python/JavaScript 在本地做所有聚合、分组、对比、环比计算。避免对同一实体反复调用 MCP 接口。
-3. **最少调用原则**：每个实体最多调 1-2 次（一次拉原始数据，必要时一次拉元数据）。13 次 aggregate 调用是反模式——应该 4-5 次 search 拉原始数据 + 本地分析。
-4. **时间范围一次拉够**：如果需要"最近30天 vs 上月"对比，一次性拉 60 天数据，本地按时间分组，不要分两次调用。
+
+**强制规则：**
+- **禁止多次调用 `entity-aggregate`**。每个实体最多调用 1 次 aggregate（仅用于获取总数），其余分析必须用 `entity-search` 拉原始数据后本地计算。
+- **必须用 `entity-search` 批量拉取**：pageSize 设 200-500，一次性拉够时间范围（如需要 30 天 + 上月对比，就拉 60 天）。
+- **本地完成所有分析**：拿到原始数据后，用 Python/JavaScript 在本地做聚合、分组、对比、环比。不要为了每个分析维度单独调 MCP。
+
+**正确流程示例：**
+```
+1. entity-search(opportunity, pageSize=200, 时间范围=60天)  ← 一次拉够
+2. entity-search(order, pageSize=200, 时间范围=60天)        ← 一次拉够
+3. 本地 Python/JS: 按时间分组、计算环比、聚合金额          ← 本地分析
+4. 组装 JSON → 嵌入模板 → 交付
+```
+
+**错误模式（禁止）：**
+```
+entity-aggregate(opportunity, 最近30天)     ← 第1次
+entity-aggregate(opportunity, 上月)         ← 第2次 禁止！
+entity-aggregate(opportunity, 全量)         ← 第3次 禁止！
+entity-aggregate(order, 最近30天)           ← 第4次
+entity-aggregate(order, 按transactionDate)  ← 第5次 禁止！
+... 共13次 aggregate 调用 ← 这是反模式
+```
 
 ## 第 1 步：选择图表类型
 
