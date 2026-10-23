@@ -40,6 +40,14 @@ const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotification
 vi.mock('@modelcontextprotocol/client', () => ({
   Client: MockClient,
   StreamableHTTPClientTransport: vi.fn(),
+  // connection.ts guards its 401-retry path with `instanceof UnauthorizedError`;
+  // vitest throws on mock-missing exports, so the class must exist here.
+  UnauthorizedError: class UnauthorizedError extends Error {
+    constructor(message?: string) {
+      super(message)
+      this.name = 'UnauthorizedError'
+    }
+  },
 }))
 
 vi.mock('@modelcontextprotocol/client/stdio', () => ({
@@ -111,12 +119,13 @@ describe('mcp-client plugin module exports', () => {
   })
 
   it('Config schema accepts a valid serverName', () => {
-    const resolved = ConfigSchema({
+    // toMatchObject: the resolved type is a transport union, so static
+    // property access would need narrowing that the schema call cannot express.
+    expect(ConfigSchema({
       transport: 'stdio',
       serverName: 'github-prod_1',
       command: 'echo',
-    } as never)
-    expect(resolved.serverName).toBe('github-prod_1')
+    } as never)).toMatchObject({ serverName: 'github-prod_1' })
   })
 
   it('Config schema materializes reconnect defaults and merges partial overrides', () => {

@@ -15,15 +15,17 @@
  * @module
  */
 
-import { Client, type Transport } from '@modelcontextprotocol/client'
+import { Client, UnauthorizedError, type Transport } from '@modelcontextprotocol/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ServerContext } from './server-context.ts'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { createTransport } from './transport.ts'
+import type { TransportExtras } from './transport.ts'
 import { syncTools } from './tools.ts'
 import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
-import type { Config } from './index.ts'
+import type { StdioConfig, StreamableHttpConfig } from './index.ts'
+import { renewGatewayToken, type TokenRenewalConfig } from './token-renewal.ts'
 
 /** Automatic reconnect policy for one MCP server connection. */
 export interface ReconnectConfig {
@@ -124,7 +126,12 @@ export interface ConnectionHandle extends ServerContext {
  * @param policy - Resolved reconnect policy from {@link resolveReconnectPolicy}.
  * @returns Handle with a `ready` promise for startup-await and a `dispose` for teardown.
  */
-export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy): ConnectionHandle {
+export function startConnection(
+  ctx: Context,
+  config: StdioConfig | StreamableHttpConfig,
+  policy: ResolvedReconnectPolicy,
+  renewalConfig?: TokenRenewalConfig,
+): ConnectionHandle {
   const label = `mcp-client(${config.serverName})`
   const incompleteDisposalMessage = `${label}: transport closure could not be confirmed during disposal — server shutdown may be incomplete`
   const opts: ToolBridgeOptions = {
@@ -155,6 +162,97 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   let connectedAt: number | undefined
   /** The real error from the first connection attempt, for startup-await diagnostics. */
   let firstAttemptError: unknown
+
+  // ---- Token renewal (gateway Keycloak credentials) ----
+  let currentToken: string | undefined = config.transport === 'streamable-http'
+    ? config.headers?.authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
+    : undefined
+  let renewing = false
+
+  /** Build headers for the current connection attempt, including any renewed token. */
+  function currentHeaders(): Record<string, string> {
+    if (config.transport === 'streamable-http' && currentToken) {
+      return { ...config.headers, authorization: `Bearer ${currentToken}` }
+    }
+    return config.transport === 'streamable-http' ? config.headers : {}
+  }
+
+  /** Acquire or renew the gateway token from Keycloak credentials. */
+  async function tryRenewToken(): Promise<boolean> {
+    if (!renewalConfig || renewing) return false
+    renewing = true
+    try {
+      ctx.logger.info(`${label}: attempting token renewal via Keycloak...`)
+      currentToken = await renewGatewayToken(renewalConfig)
+      ctx.logger.info(`${label}: token renewed successfully`)
+      return true
+    } catch (error) {
+      ctx.logger.error(`${label}: token renewal failed: ${String(error)}`)
+      return false
+    } finally {
+      renewing = false
+    }
+  }
+
+  /** Create a new MCP Client generation with the tool-refresh callback wired. */
+  const createClient = (onChanged: () => void): Client => new Client(
+    { name: 'dsh-mcp-client', version: '0.0.1' },
+    {
+      capabilities: {},
+      versionNegotiation: { mode: 'auto' },
+      listChanged: {
+        tools: {
+          autoRefresh: false,
+          debounceMs: 0,
+          onChanged: () => { void onChanged() },
+        },
+      },
+    },
+  )
+
+  /**
+   * Renew an expired token and re-establish the connection with a fresh session.
+   * Called by tool executors when a mid-session 401 occurs.
+   */
+  async function renewTokenAndReconnect(): Promise<boolean> {
+    const renewed = await tryRenewToken()
+    if (!renewed) return false
+    // Close the current broken session.
+    if (client && closeClient) {
+      await closeClient()
+    }
+    // Create a fresh client and transport with the new token.
+    const active = createClient(() => { const c = client; if (c) void refreshTools(c) })
+    client = active
+    const retryExtras: TransportExtras = { headersProvider: currentHeaders }
+    const transport = createTransport(config, retryExtras)
+    try {
+      await active.connect(transport)
+      // Re-sync tools with the new client so future calls use the fresh session.
+      await enqueueSync(active)
+      return true
+    } catch (error) {
+      ctx.logger.error(`${label}: reconnection after token renewal failed: ${String(error)}`)
+      return false
+    }
+  }
+
+  /** Refresh the tool list for the given client generation. */
+  async function refreshTools(generation: Client): Promise<void> {
+    if (!isCurrent(generation)) return
+    ctx.logger.info(`${label}: tool list changed, re-syncing`)
+    try {
+      await enqueueSync(generation)
+    } catch (error) {
+      if (!disposed) ctx.logger.error(`${label}: tool re-sync failed: ${String(error)}`)
+    }
+  }
+
+  // Wire token renewal and client getter into tool bridge options.
+  if (renewalConfig) {
+    opts.renewToken = renewTokenAndReconnect
+    opts.currentClient = () => client
+  }
 
   /** A generation may act only while it is the current one on a live plugin. */
   const isCurrent = (generation: Client): boolean => !disposed && client === generation
@@ -255,88 +353,99 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
    * @param startup - Whether this is the plugin's activation attempt.
    */
   async function connectGeneration(startup: boolean): Promise<void> {
-    const generation = new Client(
-      { name: 'dsh-mcp-client', version: '0.0.1' },
-      {
-        capabilities: {},
-        versionNegotiation: { mode: 'auto' },
-        listChanged: {
-          tools: {
-            autoRefresh: false,
-            debounceMs: 0,
-            onChanged: () => { void refreshTools() },
-          },
-        },
-      },
-    )
+    // The SDK binds a Protocol to one transport for life; after a token
+    // renewal on the shared transport, a fresh generation re-runs
+    // initialize on it. `active` tracks whichever generation is live this attempt.
+    let active = createClient(() => refreshTools(active))
     const closed: PromiseWithResolvers<void> = Promise.withResolvers()
     let attemptSettled = false
     let closeObserved = false
     let transport: Transport | undefined
     const hasClosed = (): boolean => closeObserved
-    client = generation
-    closeClient = closeGeneration
-    generation.onclose = () => {
-      closeObserved = true
-      closed.resolve()
-      // A failed connect owns its close barrier in the catch path below. An
-      // established generation can transition down directly from this signal.
-      if (attemptSettled) generationDown(generation)
+    client = active
+    closeClient = closeActive
+    const attachClose = (generation: Client): void => {
+      generation.onclose = () => {
+        closeObserved = true
+        closed.resolve()
+        // A failed connect owns its close barrier in the catch path below. An
+        // established generation can transition down directly from this signal.
+        if (attemptSettled) generationDown(generation)
+      }
     }
-    /** Unattached probes close through their transport; attached clients must also report transport closure. */
-    async function closeGeneration(): Promise<boolean> {
-      const attached = generation.transport !== undefined
+    attachClose(active)
+    /** Close the attached generation, or its bare transport before attach. */
+    async function closeActive(): Promise<boolean> {
+      const attached = active.transport !== undefined
       try {
-        await (attached ? generation.close() : transport?.close())
+        await (attached ? active.close() : transport?.close())
       } catch (_error) {
         if (!attached) return hasClosed()
       }
       return !attached || hasClosed() || await waitForClose(closed.promise)
     }
-    async function refreshTools(): Promise<void> {
-      if (!isCurrent(generation)) return
-      ctx.logger.info(`${label}: tool list changed, re-syncing`)
-      try {
-        await enqueueSync(generation)
-      } catch (error) {
-        if (!disposed) ctx.logger.error(`${label}: tool re-sync failed: ${String(error)}`)
-      }
-    }
+
     let instructions: string
     try {
-      transport = createTransport(config)
-      await generation.connect(transport)
+      // Acquire initial token on first attempt if credentials are configured but no static authorization header exists.
+      if (config.transport === 'streamable-http' && !currentToken && renewalConfig && !config.headers.authorization) {
+        await tryRenewToken()
+      }
+      const extras: TransportExtras = { headersProvider: currentHeaders }
+      transport = createTransport(config, extras)
+      try {
+        await active.connect(transport)
+      } catch (connectError) {
+        // 401 from gateway → renew token and retry once.
+        if (connectError instanceof UnauthorizedError && renewalConfig && !renewing) {
+          ctx.logger.info(`${label}: got 401, attempting token renewal before reconnect...`)
+          const renewed = await tryRenewToken()
+          if (renewed) {
+            active = createClient(() => refreshTools(active))
+            attachClose(active)
+            client = active
+            closeClient = closeActive
+            const retryExtras: TransportExtras = { headersProvider: currentHeaders }
+            transport = createTransport(config, retryExtras)
+            await active.connect(transport)
+          } else {
+            throw connectError
+          }
+        } else {
+          throw connectError
+        }
+      }
       if (hasClosed()) {
         attemptSettled = true
-        generationDown(generation)
+        generationDown(active)
         return
       }
-      if (!isCurrent(generation)) {
-        if (!await closeGeneration()) ctx.logger.error(incompleteDisposalMessage)
+      if (!isCurrent(active)) {
+        if (!await closeActive()) ctx.logger.error(incompleteDisposalMessage)
         return
       }
-      const serverText = generation.getInstructions()?.trimEnd() ?? ''
+      const serverText = active.getInstructions()?.trimEnd() ?? ''
       instructions = serverText ? `### MCP server: ${config.serverName}\n\n${serverText}` : ''
       if (Buffer.byteLength(instructions) > maxInstructionBytes) {
         throw new Error(`${label}: server instructions exceed maxInstructionBytes (${maxInstructionBytes})`)
       }
-      await enqueueSync(generation, startup ? startupOpts : opts)
+      await enqueueSync(active, startup ? startupOpts : opts)
     } catch (error) {
       if (firstAttemptError === undefined) firstAttemptError = error
       // Disposal clears current ownership before it closes the generation, so
       // only a live supervisor reports an attempt failure.
-      if (isCurrent(generation)) ctx.logger.warn(`${label}: connection attempt failed: ${String(error)}`)
-      const quiesced = await closeGeneration()
+      if (isCurrent(active)) ctx.logger.warn(`${label}: connection attempt failed: ${String(error)}`)
+      const quiesced = await closeActive()
       attemptSettled = true
-      settleFailedGeneration(generation, quiesced)
+      settleFailedGeneration(active, quiesced)
       return
     }
     attemptSettled = true
     if (hasClosed()) {
-      generationDown(generation)
+      generationDown(active)
       return
     }
-    if (!isCurrent(generation)) return
+    if (!isCurrent(active)) return
     serverInstructions = instructions
     connectedAt = Date.now()
     if (failedAttempts > 0) ctx.logger.info(`${label}: reconnected and re-synced tools (attempt ${failedAttempts}/${policy.maxAttempts})`)
