@@ -25,9 +25,9 @@ function toolInput(raw: string): Record<string, unknown> {
 
 function assistant(message: Message, model: string, onReplayDegrade?: (reason: string) => void): WireBlock[] {
   const replay = readReplay(message, model, onReplayDegrade)
-  return message.content.flatMap((block, index): WireBlock | WireBlock[] => {
+  return message.content.map((block, index): WireBlock => {
     switch (block.type) {
-      case 'text': return block.text.length === 0 ? [] : { type: 'text', text: block.text }
+      case 'text': return { type: 'text', text: block.text }
       case 'reasoning': return {
         type: 'thinking', thinking: block.text,
         ...replay?.[index]?.signature === undefined ? {} : { signature: replay[index].signature },
@@ -40,8 +40,7 @@ function assistant(message: Message, model: string, onReplayDegrade?: (reason: s
 
 /** Serialize one complete request using already prepared image bytes.
  * User and tool-result content omits reasoning and tool-call blocks.
- * Empty assistant text blocks and empty user/assistant messages are skipped;
- * empty tool results retain their call ids.
+ * Empty user messages are skipped; empty tool results retain their call ids.
  * Developer messages, already projected for this route by `LlmRuntime`, become
  * system-role updates after the preceding user turn, with tool changes as
  * `tool_addition` and `tool_removal` references to the declared tool.
@@ -115,13 +114,13 @@ export function serialize(
       }
       continue
     }
+    if (message.role === 'assistant') flushSystemUpdates()
     const content: WireBlock[] = message.role === 'assistant'
       ? assistant(message, options.model, onReplayDegrade)
       : message.role === 'tool'
         ? [{ type: 'tool_result', tool_use_id: message.toolCallId, content: input(message.content), ...message.isError === undefined ? {} : { is_error: message.isError } }]
         : message.content.flatMap((block): WireBlock[] => input([block]))
-    if ((message.role === 'user' || message.role === 'assistant') && content.length === 0) continue
-    if (message.role === 'assistant') flushSystemUpdates()
+    if (message.role === 'user' && content.length === 0) continue
     const wireRole = message.role === 'tool' ? 'user' : message.role
     const previous = messages.at(-1)
     if (previous?.role === wireRole) previous.content.push(...content)
@@ -144,14 +143,17 @@ export function serialize(
     }
   }
   if (pending.size > 0) throw new LlmError('DeepSeek Messages history ends with unresolved tools', 'INVALID_REQUEST')
-  const effort = options.reasoningEffort ?? (connection.defaults.reasoningEffort ?? (connection.defaults.thinking === 'disabled' ? 'off' : 'high'))
+  const effort = options.purpose === 'session-title' ? 'off' : options.reasoningEffort ?? (connection.defaults.reasoningEffort ?? (connection.defaults.thinking === 'disabled' ? 'off' : 'high'))
   if (!['off', 'low', 'high', 'max'].includes(effort) || (connection.defaults.thinking === 'disabled' && effort !== 'off')) {
     throw new LlmError(`DeepSeek Messages does not support reasoning effort ${effort}`, 'UNSUPPORTED_REASONING_EFFORT')
   }
   const system = [options.system, historySystem].filter(Boolean).join('\n\n')
+  const rawMaxTokens = options.maxTokens ?? model?.maxTokens ?? connection.maxTokens
+  const effectiveContextWindow = model?.contextWindow ?? connection.defaultContextWindow
+  const maxTokens = Math.min(rawMaxTokens, effectiveContextWindow)
   return {
     model: options.model, stream: true, messages,
-    max_tokens: options.maxTokens ?? model?.maxTokens ?? connection.maxTokens,
+    max_tokens: maxTokens,
     thinking: { type: effort === 'off' ? 'disabled' : 'enabled' },
     ...effort === 'off' ? {} : { output_config: { effort: effort as 'low' | 'high' | 'max' } },
     ...system.length === 0 ? {} : { system },
