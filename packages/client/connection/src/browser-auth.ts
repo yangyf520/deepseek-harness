@@ -127,7 +127,12 @@ function cookieValue(headerValue: string, name: string): string | undefined {
   return undefined
 }
 
-/** Serialize the fixed browser-session attributes; generated names and values are cookie-safe base64url. */
+/**
+ * Serialize the fixed browser-session attributes; generated names and values are cookie-safe base64url.
+ * `SameSite=Lax` rather than `Strict`: the token exchange completes a redirect chain that began
+ * cross-site (the OAuth handoff), and browsers withhold a `Strict` cookie from the chain's remaining
+ * hops, so the index request one hop later would arrive without it.
+ */
 function sessionCookie(
   name: string,
   value: string,
@@ -135,7 +140,7 @@ function sessionCookie(
   maxAgeSeconds: number,
   secure: boolean,
 ): string {
-  const attributes = `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Strict`
+  const attributes = `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Lax`
   return secure ? `${attributes}; Secure` : attributes
 }
 
