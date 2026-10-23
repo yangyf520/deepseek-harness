@@ -19,19 +19,6 @@ description: 跨系统业务工具使用指南——查询、录入、执行、�
 
 ---
 
-## 实体必填参数（事实速查）
-
-| 实体 | 必填参数 | 默认值 | 说明 |
-|---|---|---|---|
-| `order` | `dataView` | `order_view_all` | 可选：`order_view_owner` / `order_view_member` / `order_view_approval` |
-| `opportunity` | — | — | 无需指定视图 |
-| `account` | — | — | 无需指定视图 |
-| `contract` | `dataView` | `contract_view_all` | 可选：`contract_view_owner` / `contract_view_approval` |
-
-**规则**：查询前检查上表，缺必填参数则补全。不确定视图时先用默认值。
-
----
-
 ## 工具识别
 
 外部工具通常以 `mcp__<server>__<tool>` 或 `db__<tool>` 等命名，按前缀判断类型：
@@ -84,6 +71,7 @@ result = {"by_status": by_status, "total": len(data)}
 ## 错误处理
 
 - 工具返回错误 → 分析错误原因 → 自动修正参数重试
-- 校验错误 → 根据错误信息修正 → 重试
+- 校验错误（如 missing required field、invalid view）→ **从错误信息中提取可用选项** → 用正确值重试
 - 权限错误 → 告知用户无权限
 - 数据为空 → 告知用户未找到匹配数据，建议调整条件
+- **仔细阅读工具描述**：多数工具描述已包含必填参数、参数格式、可用选项等信息，调用前务必通读
