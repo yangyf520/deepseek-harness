@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "认证网关",
+    "description": "OAuth2 登录网关（飞书/钉钉/企业微信/微信），轻量身份 cookie。"
+  }
+}

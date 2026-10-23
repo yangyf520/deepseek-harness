@@ -408,6 +408,9 @@
     - id: timeout-policy
       name: '@deepseek-ai/dsh-tool-call-timeout-policy'
 
+    - id: git-guard
+      name: '@deepseek-ai/dsh-git-guard'
+
     - id: spill-local
       name: '@deepseek-ai/dsh-spill-local'
 
@@ -491,6 +494,11 @@
 
     - id: mcp-resources
       name: '@deepseek-ai/dsh-mcp-resources'
+
+    # Database query tools: auto-skips when DATABASE_URL is not set.
+    - id: tool-db
+      name: '@deepseek-ai/dsh-tool-db'
+      disabled: true
 
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 

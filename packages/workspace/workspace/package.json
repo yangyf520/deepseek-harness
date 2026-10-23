@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-brand": "workspace:*",
+    "@deepseek-ai/dsh-home-paths": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

@@ -1,0 +1,22 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../webserver" },
+    { "path": "../auth-gate" },
+    { "path": "../directory-picker" },
+    { "path": "../directory-picker-browse" },
+    { "path": "../../client/connection/tsconfig.host.json" },
+    { "path": "../../core/tools" },
+    { "path": "../../util/home-paths" },
+    { "path": "../../workspace/workspace" }
+  ]
+}

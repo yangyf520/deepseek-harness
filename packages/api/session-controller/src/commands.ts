@@ -1,6 +1,7 @@
 /** Session commands whose activation policy is explicit at each Remote method. */
 
 import { modelAvailable } from './catalog.ts'
+import { assertCwdVisible } from './tenant-visibility.ts'
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -122,6 +123,7 @@ export class SessionCommandController {
       }
     }
     const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+    assertCwdVisible(cwd)
     let created: ApiSessionCreated
     try {
       created = await this.agents.createSession({

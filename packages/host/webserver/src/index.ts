@@ -37,6 +37,25 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'webserver/index-inject'(table: IndexInjection[]): void
+    /**
+     * Pre-route HTTP gate. Each listener wraps the next; a listener that
+     * owns the response (e.g. 302 redirect) simply does not call next().
+     * @param request - Incoming HTTP request.
+     * @param response - Response the listener may own.
+     * @param next - Delegate to the next gate or route dispatch.
+     * @mode waterfall
+     */
+    'webserver/request'(request: IncomingMessage, response: ServerResponse, next: () => Promise<void>): Promise<void>
+    /**
+     * Pre-route upgrade gate. Each listener wraps the next; a listener that
+     * owns the socket (e.g. destroy) simply does not call next().
+     * @param request - Incoming upgrade request.
+     * @param socket - Raw socket.
+     * @param head - Bytes already read after the upgrade headers.
+     * @param next - Delegate to the next gate or upgrade dispatch.
+     * @mode waterfall
+     */
+    'webserver/upgrade'(request: IncomingMessage, socket: Duplex, head: Buffer, next: () => Promise<void>): Promise<void>
   }
 }
 
@@ -420,21 +439,23 @@ export class WebServer extends Service {
   /** Listen; resolves once the socket is bound (rejection = FAILED fiber). */
   async [Service.init](): Promise<void> {
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server
-      requests; the field is only optional on the client-side IncomingMessage type */
-      const rawPath = new URL(req.url ?? '/', 'http://x').pathname
-      const route = this.match(rawPath)
-      if (route !== undefined) {
-        await route.handler(req, res)
-        return
-      }
-      const fallback = this.fallback
-      if (fallback === undefined) {
-        res.writeHead(404)
-        res.end()
-        return
-      }
-      await fallback(req, res)
+      await this.ctx.waterfall('webserver/request', req, res, async () => {
+        /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server
+        requests; the field is only optional on the client-side IncomingMessage type */
+        const rawPath = new URL(req.url ?? '/', 'http://x').pathname
+        const route = this.match(rawPath)
+        if (route !== undefined) {
+          await route.handler(req, res)
+          return
+        }
+        const fallback = this.fallback
+        if (fallback === undefined) {
+          res.writeHead(404)
+          res.end()
+          return
+        }
+        await fallback(req, res)
+      })
     }
     // Last-resort guard: handle() rejecting would otherwise be an unhandled
     // rejection killing the process on one malformed request (bad %-escape,
@@ -487,29 +508,34 @@ export class WebServer extends Service {
           socket.off('error', onError)
           this.upgradedSockets.delete(socket)
         })
-        let route: WebUpgradeRoute | undefined
-        try {
-          /* v8 ignore next -- node:http always sets url on server requests. */
-          route = this.upgrades.get(new URL(req.url ?? '/', 'http://x').pathname)
-        } catch (error) {
-          this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
-          socket.destroy()
-          return
-        }
-        if (route === undefined) {
-          socket.destroy()
-          return
-        }
-        this.upgradedSockets.add(socket)
-        try {
-          Promise.resolve(route.handler(req, socket, head)).catch((error: unknown) => {
+        void this.ctx.waterfall('webserver/upgrade', req, socket, head, async () => {
+          let route: WebUpgradeRoute | undefined
+          try {
+            /* v8 ignore next -- node:http always sets url on server requests. */
+            route = this.upgrades.get(new URL(req.url ?? '/', 'http://x').pathname)
+          } catch (error) {
             this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
             socket.destroy()
-          })
-        } catch (error) {
+            return
+          }
+          if (route === undefined) {
+            socket.destroy()
+            return
+          }
+          this.upgradedSockets.add(socket)
+          try {
+            Promise.resolve(route.handler(req, socket, head)).catch((error: unknown) => {
+              this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+              socket.destroy()
+            })
+          } catch (error) {
+            this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+            socket.destroy()
+          }
+        }).catch((error: unknown) => {
           this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
           socket.destroy()
-        }
+        })
       })
 
       await new Promise<void>((resolve, reject) => {
