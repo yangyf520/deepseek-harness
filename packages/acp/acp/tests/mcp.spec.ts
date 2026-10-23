@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { McpServer } from '@agentclientprotocol/sdk'
-import type { Config as McpClientConfig } from '@deepseek-ai/dsh-mcp-client'
+import type { Config as McpClientConfig, StdioConfig, StreamableHttpConfig } from '@deepseek-ai/dsh-mcp-client'
 import { mountAcpMcpServers } from '../src/mcp.ts'
 
 /** Context stand-in that captures validated MCP configs without opening transports. */
@@ -42,14 +42,14 @@ describe('ACP MCP declaration mapping', () => {
       cwd: process.cwd(),
       failOnStartupError: true,
     })
-    expect(configs[0]?.serverName).toMatch(/^Fancy_server_[0-9a-f]{8}$/)
+    expect((configs[0] as StdioConfig)?.serverName).toMatch(/^Fancy_server_[0-9a-f]{8}$/)
     expect(configs[1]).toMatchObject({
       transport: 'streamable-http',
       url: 'https://example.test/mcp',
       headers: { Authorization: 'Bearer token' },
       failOnStartupError: true,
     })
-    expect(configs[1]?.serverName).toMatch(/^server_[0-9a-f]{8}$/)
+    expect((configs[1] as StreamableHttpConfig)?.serverName).toMatch(/^server_[0-9a-f]{8}$/)
   })
 
   it.each([

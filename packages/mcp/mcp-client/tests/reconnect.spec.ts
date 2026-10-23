@@ -10,7 +10,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import McpResources from '@deepseek-ai/dsh-mcp-resources'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { Config } from '@deepseek-ai/dsh-mcp-client'
+import type { StdioConfig } from '@deepseek-ai/dsh-mcp-client'
 
 // ---- Mock MCP SDK ----
 
@@ -89,7 +89,7 @@ function captureLogs(ctx: Context): { warns: string[]; errors: string[]; infos: 
   return { warns, errors, infos }
 }
 
-function stdioConfig(reconnect?: Config['reconnect']): Config {
+function stdioConfig(reconnect?: StdioConfig['reconnect']): StdioConfig {
   return {
     transport: 'stdio',
     serverName: 'srv',

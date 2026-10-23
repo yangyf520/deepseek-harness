@@ -12,12 +12,12 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { startConnection, resolveReconnectPolicy } from '../src/connection.ts'
-import type { Config } from '../src/index.ts'
+import type { StdioConfig } from '../src/index.ts'
 
 const { mockTransport } = vi.hoisted(() => ({ mockTransport: vi.fn<() => Transport>() }))
 vi.mock('../src/transport.ts', () => ({ createTransport: mockTransport }))
 
-const config: Config = {
+const config: StdioConfig = {
   transport: 'stdio', serverName: 'fixture', command: 'fixture', args: [], env: {}, cwd: '',
   toolCallTimeoutMs: 60_000, failOnStartupError: false,
 }

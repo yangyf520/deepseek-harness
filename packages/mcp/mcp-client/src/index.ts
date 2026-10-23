@@ -1,14 +1,18 @@
 /**
- * MCP client bridge plugin: connects to an external MCP server and registers
- * its tools on `ctx.tools` under server-qualified public names
- * (`mcp__<serverName>__<rawName>`). Each plugin instance connects to one MCP
- * server; load multiple instances in `cordis.yml` for multiple servers.
+ * MCP client bridge plugin: connects to external MCP servers and registers
+ * their tools on `ctx.tools` under server-qualified public names
+ * (`mcp__<serverName>__<rawName>`).
+ *
+ * Supports three transport modes:
+ * - `stdio`: spawns a child-process MCP server.
+ * - `streamable-http`: connects to a single MCP server over HTTP.
+ * - `gateway`: auto-discovers all enabled virtual servers from an MCP Gateway
+ *   Registry and manages one connection per discovered server.
  *
  * Namespace plugin (named exports, no default export). Lifecycle is
- * effect-scoped: disposal disconnects from the server, unregisters all tools,
- * and releases the `serverName` namespace reservation. HMR hot-swaps by
- * disposing the old instance and creating a new one; identical `serverName`
- * reproduces identical public tool names.
+ * effect-scoped: disposal disconnects from the server(s), unregisters all
+ * tools, and releases the `serverName` namespace reservation(s). HMR
+ * hot-swaps by disposing the old instance and creating a new one.
  *
  * @module @deepseek-ai/dsh-mcp-client
  */
@@ -20,12 +24,16 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { DEFAULT_MAX_INSTRUCTION_BYTES, RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from './connection.ts'
 import type { ReconnectConfig } from './connection.ts'
 import { registerServerContext } from './server-context.ts'
+import type { KeycloakCredentials, TokenRenewalConfig } from './token-renewal.ts'
+import { startGatewayWatcher } from './discovery.ts'
+import type { WatchDiscoveryConfig } from './discovery.ts'
 // Side-effect type import: declaration-merges `ctx.tools` onto Context.
 import type {} from '@deepseek-ai/dsh-tools'
 
 export { createMcpToolDefinition } from './tools.ts'
 export type { McpResult, McpToolDefinitionOptions } from './tools.ts'
 export type { ReconnectConfig, ResolvedReconnectPolicy } from './connection.ts'
+export type { WatchDiscoveryConfig, GatewayWatcherHandle } from './discovery.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'mcp-client'
@@ -45,6 +53,8 @@ const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
  * duplicates inside one Agent remain mutually exclusive.
  */
 const activeServerNames = new WeakMap<object, Set<string>>()
+
+
 
 // ---- Config ----
 
@@ -90,6 +100,12 @@ export interface StreamableHttpConfig {
   url: string
   /** Additional headers attached to MCP requests. */
   headers: Record<string, string>
+  /**
+   * Keycloak credentials for automatic token acquisition and renewal.
+   * When provided without an explicit `authorization` header, the plugin
+   * obtains a gateway JWT on startup and renews it on 401.
+   */
+  credentials?: KeycloakCredentials
   /** Timeout per tool call or resource request in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
@@ -100,20 +116,56 @@ export interface StreamableHttpConfig {
   reconnect?: ReconnectConfig
 }
 
-/** Configuration for one stdio or Streamable HTTP MCP server. */
-export type Config = StdioConfig | StreamableHttpConfig
+/**
+ * Config for gateway auto-discovery mode: authenticates with an MCP Gateway
+ * Registry, polls for all enabled virtual servers, and manages one connection
+ * per discovered server. No static URL or serverName needed — the gateway
+ * controls which servers are visible.
+ */
+export interface GatewayConfig {
+  /** Selects gateway auto-discovery transport. */
+  transport: 'gateway'
+  /** Gateway auto-discovery settings. */
+  watchDiscovery: WatchDiscoveryConfig
+  /** Timeout per tool call or resource request in milliseconds. */
+  toolCallTimeoutMs: number
+  /** Fail plugin activation when the initial discovery poll fails. */
+  failOnStartupError: boolean
+  /** Automatic reconnect policy for each discovered connection; omission uses the defaults. */
+  reconnect?: ReconnectConfig
+}
+
+/** Configuration for one stdio, Streamable HTTP, or gateway-discovery MCP server. */
+export type Config = StdioConfig | StreamableHttpConfig | GatewayConfig
 
 type StdioConfigInput = Omit<StdioConfig, 'args' | 'env' | 'cwd' | 'toolCallTimeoutMs' | 'failOnStartupError'>
   & Partial<Pick<StdioConfig, 'args' | 'env' | 'cwd' | 'toolCallTimeoutMs' | 'failOnStartupError'>>
 type StreamableHttpConfigInput = Omit<StreamableHttpConfig, 'headers' | 'toolCallTimeoutMs' | 'failOnStartupError'>
   & Partial<Pick<StreamableHttpConfig, 'headers' | 'toolCallTimeoutMs' | 'failOnStartupError'>>
-type ConfigInput = StdioConfigInput | StreamableHttpConfigInput
+type GatewayConfigInput = Omit<GatewayConfig, 'toolCallTimeoutMs' | 'failOnStartupError'>
+  & Partial<Pick<GatewayConfig, 'toolCallTimeoutMs' | 'failOnStartupError'>>
+type ConfigInput = StdioConfigInput | StreamableHttpConfigInput | GatewayConfigInput
+
+const Credentials = z.object({
+  username: z.string().default(''),
+  password: z.string().default(''),
+})
 
 const Reconnect: z<ReconnectConfig> = z.object({
   enabled: z.boolean().default(RECONNECT_DEFAULTS.enabled),
   initialDelayMs: z.number().min(1).max(MAX_TIMER_DELAY_MS).default(RECONNECT_DEFAULTS.initialDelayMs),
   maxDelayMs: z.number().min(1).max(MAX_TIMER_DELAY_MS).default(RECONNECT_DEFAULTS.maxDelayMs),
   maxAttempts: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(RECONNECT_DEFAULTS.maxAttempts),
+})
+
+const WatchDiscovery = z.object({
+  gatewayUrl: z.string().required(),
+  credentials: Credentials,
+  pollIntervalMs: z.number().min(5_000).max(600_000).default(60_000),
+  discoveryEndpoint: z.string().default(''),
+  mcpPathPattern: z.string().default(''),
+  serverFilter: z.array(String).default([]),
+  startupTimeoutMs: z.number().min(1_000).max(300_000).default(30_000),
 })
 
 export const Config = z.union([
@@ -134,9 +186,17 @@ export const Config = z.union([
     serverName: z.string().required().pattern(SERVER_NAME_PATTERN),
     url: z.string().required(),
     headers: z.dict(String).default({}),
+    credentials: Credentials,
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     maxInstructionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_INSTRUCTION_BYTES),
+    reconnect: Reconnect,
+  }),
+  z.object({
+    transport: z.const('gateway'),
+    watchDiscovery: WatchDiscovery,
+    toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
+    failOnStartupError: z.boolean().default(false),
     reconnect: Reconnect,
   }),
 ]) as z<ConfigInput, Config>
@@ -144,7 +204,12 @@ export const Config = z.union([
 // ---- Plugin apply ----
 
 /**
- * Connect one MCP server and publish its initial tool generation before activation.
+ * Connect MCP server(s) and publish their initial tool generation before activation.
+ *
+ * In `stdio` and `streamable-http` modes, connects to one statically configured
+ * server. In `gateway` mode, auto-discovers all enabled virtual servers from
+ * the gateway and manages one connection per server.
+ *
  * This entry remains explicitly `async`: Cordis treats a prototype-bearing
  * ordinary function as a constructor, whose returned Promise is not startup work.
  * @param ctx - plugin context carrying the tool registry.
@@ -152,6 +217,14 @@ export const Config = z.union([
  * @returns startup readiness after connection and initial tool discovery settle.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  if (config.transport === 'gateway') {
+    return applyGateway(ctx, config)
+  }
+  return applyStatic(ctx, config)
+}
+
+/** Static single-server mode (stdio or streamable-http). */
+async function applyStatic(ctx: Context, config: StdioConfig | StreamableHttpConfig): Promise<void> {
   // Fail loud at load: reconnect misconfiguration (including programmatic
   // construction that bypassed Schemastery) rejects THIS instance before any
   // effect registers.
@@ -175,16 +248,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     return () => void names.delete(config.serverName)
   }, 'mcp-client.serverName')
 
+  // Build token renewal config from credentials + URL origin.
+  const renewalConfig: TokenRenewalConfig | undefined =
+    config.transport === 'streamable-http' && config.credentials?.username && config.credentials?.password
+      ? {
+        gatewayUrl: new URL(config.url).origin,
+        credentials: { username: config.credentials.username, password: config.credentials.password },
+      }
+      : undefined
+
   // The supervisor owns the client/transport generations, the reconnect
   // loop, and the live tool registrations; disposal stops reconnection,
   // quiesces in-flight work, and unregisters the current generation.
-  const connection = startConnection(ctx, config, reconnect)
+  const connection = startConnection(ctx, config, reconnect, renewalConfig)
   registerServerContext(ctx, config.serverName, connection)
+
   let stopping: Promise<void> | undefined
   const dispose = (): Promise<void> => stopping ??= connection.dispose()
   // Cordis announces unload before awaiting an unfinished apply(). Closing
   // the transport here releases startup requests that are still awaiting a reply.
-  // oxlint-disable-next-line typescript/no-misused-promises -- Cordis contains observer failures; the effect also awaits this promise.
   ctx.on('internal/plugin', (fiber) => {
     if (fiber !== ctx.fiber || fiber.uid !== null) return
     return dispose()
@@ -199,5 +281,37 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const outcome = await connection.ready
   if (outcome.error !== undefined && config.failOnStartupError) {
     throw new Error(`mcp-client(${config.serverName}): initial connection or tool synchronization failed`, { cause: outcome.error })
+  }
+}
+
+/** Gateway auto-discovery mode: polls for virtual servers, manages N connections. */
+async function applyGateway(ctx: Context, config: GatewayConfig): Promise<void> {
+  const watcher = startGatewayWatcher(ctx, {
+    watchDiscovery: config.watchDiscovery,
+    toolCallTimeoutMs: config.toolCallTimeoutMs,
+    failOnStartupError: config.failOnStartupError,
+    reconnect: config.reconnect,
+  })
+
+  let stopping: Promise<void> | undefined
+  const dispose = (): Promise<void> => stopping ??= watcher.dispose()
+  ctx.on('internal/plugin', (fiber) => {
+    if (fiber !== ctx.fiber || fiber.uid !== null) return
+    return dispose()
+  }, { global: true })
+  ctx.effect(() => dispose, 'mcp-client.gateway-watcher')
+
+  // Gateway discovery runs in the background: virtual server connections
+  // appear progressively as the first poll completes. When failOnStartupError
+  // is set, bound the wait so a hung poll cannot block the host forever.
+  if (config.failOnStartupError) {
+    const timeout = new Promise<'timeout'>((resolve) => {
+      const timer = setTimeout(() => resolve('timeout'), config.toolCallTimeoutMs)
+      timer.unref()
+    })
+    const result = await Promise.race([watcher.ready.then(() => 'done' as const), timeout])
+    if (result === 'timeout') {
+      throw new Error('mcp-client(gateway-discovery): initial discovery poll timed out')
+    }
   }
 }

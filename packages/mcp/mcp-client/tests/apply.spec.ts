@@ -8,7 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { createScope } from '@deepseek-ai/dsh-scope'
-import type { Config } from '@deepseek-ai/dsh-mcp-client'
+import type { Config, StdioConfig } from '@deepseek-ai/dsh-mcp-client'
 
 // ---- Mock MCP SDK ----
 
@@ -40,6 +40,9 @@ const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotification
 vi.mock('@modelcontextprotocol/client', () => ({
   Client: MockClient,
   StreamableHTTPClientTransport: vi.fn(),
+  // The supervisor probes this on every failed connect; a plain class keeps
+  // the instanceof check inert under the full mock.
+  UnauthorizedError: class UnauthorizedError extends Error {},
 }))
 
 vi.mock('@modelcontextprotocol/client/stdio', () => ({
@@ -116,7 +119,7 @@ describe('mcp-client plugin module exports', () => {
       serverName: 'github-prod_1',
       command: 'echo',
     } as never)
-    expect(resolved.serverName).toBe('github-prod_1')
+    expect((resolved as StdioConfig).serverName).toBe('github-prod_1')
   })
 
   it('Config schema materializes reconnect defaults and merges partial overrides', () => {
