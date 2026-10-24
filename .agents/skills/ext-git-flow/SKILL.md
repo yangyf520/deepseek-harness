@@ -16,9 +16,9 @@ DeepSeek Harness 代理的 git 安全规范。无 Cordis 插件。
 
 ## 运行时强制（git-guard）
 
-`git-guard` 插件已通过 `tools/pre-execute` 在运行时拦截：`git init`、`--force` 推送、推送到保护分支（`prd`），以及任何推送前的用户确认。不要在提示词中重复这些检查——它们由机制强制执行。
+`git-guard` 插件通过 `tools/pre-execute` 在运行时拦截：`git init`、`--force` 推送、推送到保护分支（`prd`），以及任何推送前的用户确认。
 
-以下章节覆盖 git-guard **不强制**的**工作流**部分：URL 解析、访问探测、分支选择、冲突恢复。
+**本技能覆盖 git-guard 不强制的部分**——URL 解析、访问探测、分支选择、冲突恢复。两者互补，不重复。
 
 ## 仓库门禁
 

@@ -27,11 +27,12 @@ description: '当用户要求报表、报告、数据分析、dashboard、复盘
 **MCP 取数流程（照抄）：**
 
 ```python
-# 1. 计算时间范围（60天，覆盖最近30天+上月）
+# 1. 动态计算时间范围（60天，覆盖最近30天+上月）
 import datetime
+today = datetime.date.today()
 tz = datetime.timezone(datetime.timedelta(hours=8))
-end = datetime.datetime(2026, 10, 23, 23, 59, 59, tzinfo=tz)
-start = datetime.datetime(2026, 8, 24, 0, 0, 0, tzinfo=tz)
+end = datetime.datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=tz)
+start = end - datetime.timedelta(days=60)
 start_ms, end_ms = int(start.timestamp()*1000), int(end.timestamp()*1000)
 
 # 2. 批量拉取原始数据（每个实体只调 1 次 entity-search）
@@ -44,7 +45,7 @@ orders = entity_search("order",
     page={"pageNo": 1, "pageSize": 200})
 
 # 3. 本地分析（Python 做所有聚合/分组/环比）
-last_30_start = int(datetime.datetime(2026, 9, 24, tzinfo=tz).timestamp()*1000)
+last_30_start = int((end - datetime.timedelta(days=30)).timestamp()*1000)
 recent = [o for o in opportunities if o['createdAt'] >= last_30_start]
 previous = [o for o in opportunities if o['createdAt'] < last_30_start]
 mom_growth = (len(recent) - len(previous)) / max(len(previous), 1)

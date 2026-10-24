@@ -29,9 +29,11 @@ description: 跨系统业务工具使用指南——查询、录入、执行、�
 
 写入/执行类操作：必填字段缺失时必须追问，不要猜测。操作前向用户确认内容。
 
-## 取数流程（照抄）
+## 取数流程（示例，按实际工具名替换）
 
 ```python
+# 以下以 CRM 的 entity_search 为例。实际工具名和参数格式以 tools/list 返回的描述为准。
+
 # 1. 计算时间范围（覆盖所有需要的周期，如 60 天）
 import datetime
 tz = datetime.timezone(datetime.timedelta(hours=8))
