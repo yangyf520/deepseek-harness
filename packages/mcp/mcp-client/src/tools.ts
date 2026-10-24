@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { execSync } from 'node:child_process'
-import { specTypeSchemas, SdkHttpError, UnauthorizedError, type Client, type ImageContent } from '@modelcontextprotocol/client'
+import { specTypeSchemas, SdkHttpError, UnauthorizedError, ProtocolError, type Client, type ImageContent } from '@modelcontextprotocol/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
@@ -33,6 +33,21 @@ function isAuthError(error: unknown): boolean {
   return false
 }
 
+/**
+ * Detect MCP session expiry errors (JSON-RPC -32600 with session-shaped message).
+ * The gateway recycles session IDs after inactivity; the fix is to reconnect,
+ * not to renew the JWT token (which may still be valid).
+ */
+function isSessionError(error: unknown): boolean {
+  if (error instanceof ProtocolError && error.code === -32600) {
+    return /session|invalid.*mcp.*session/i.test(error.message)
+  }
+  if (error instanceof Error) {
+    return /missing or invalid mcp-session-id/i.test(error.message)
+  }
+  return false
+}
+
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
   /** Whether a registry conflict is contained or rejects this synchronization. */
@@ -46,6 +61,12 @@ export interface ToolBridgeOptions {
   renewToken?: () => Promise<boolean>
   /** Return the current active client (updated after token renewal + reconnect). */
   currentClient?: () => Client | undefined
+  /**
+   * Re-establish the connection with a fresh MCP session ID.
+   * Used when the gateway recycles the session (e.g. after inactivity) but the
+   * JWT token is still valid. Returns true if reconnection succeeded.
+   */
+  reconnect?: () => Promise<boolean>
 }
 
 /** State for one sync generation: the current set of disposers keyed by public name. */
@@ -153,12 +174,27 @@ export async function syncTools(
       taskRequired: tool.execution?.taskSupport === 'required',
       call: async (args, execution) => {
         const activeClient = opts.currentClient?.() ?? client
+        let reconnecting = false
         try {
           return await activeClient.callTool(
             { name: tool.name, arguments: args },
             { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
           )
         } catch (callError) {
+          // MCP session expired: reconnect with a fresh session and retry once.
+          if (opts.reconnect && opts.currentClient && isSessionError(callError) && !reconnecting) {
+            reconnecting = true
+            const reconnected = await opts.reconnect()
+            if (reconnected) {
+              const freshClient = opts.currentClient()
+              if (freshClient) {
+                return await freshClient.callTool(
+                  { name: tool.name, arguments: args },
+                  { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+                )
+              }
+            }
+          }
           // Token expired mid-session: renew and retry once with a fresh client.
           if (opts.renewToken && opts.currentClient && isAuthError(callError)) {
             const renewed = await opts.renewToken()

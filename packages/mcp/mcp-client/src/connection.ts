@@ -217,22 +217,30 @@ export function startConnection(
   async function renewTokenAndReconnect(): Promise<boolean> {
     const renewed = await tryRenewToken()
     if (!renewed) return false
-    // Close the current broken session.
+    return reconnectSession()
+  }
+
+  /**
+   * Re-establish the connection with a fresh MCP session ID without renewing
+   * the JWT token. Called when the gateway recycles the session after inactivity
+   * (JSON-RPC -32600 "Missing or invalid Mcp-Session-Id") but the token is
+   * still valid.
+   */
+  async function reconnectSession(): Promise<boolean> {
     if (client && closeClient) {
       await closeClient()
     }
-    // Create a fresh client and transport with the new token.
     const active = createClient(() => { const c = client; if (c) void refreshTools(c) })
     client = active
     const retryExtras: TransportExtras = { headersProvider: currentHeaders }
     const transport = createTransport(config, retryExtras)
     try {
       await active.connect(transport)
-      // Re-sync tools with the new client so future calls use the fresh session.
       await enqueueSync(active)
+      ctx.logger.info(`${label}: reconnected with fresh MCP session`)
       return true
     } catch (error) {
-      ctx.logger.error(`${label}: reconnection after token renewal failed: ${String(error)}`)
+      ctx.logger.error(`${label}: reconnection with fresh session failed: ${String(error)}`)
       return false
     }
   }
@@ -248,9 +256,10 @@ export function startConnection(
     }
   }
 
-  // Wire token renewal and client getter into tool bridge options.
+  // Wire token renewal, session reconnection, and client getter into tool bridge options.
   if (renewalConfig) {
     opts.renewToken = renewTokenAndReconnect
+    opts.reconnect = reconnectSession
     opts.currentClient = () => client
   }
 
