@@ -18,9 +18,7 @@ description: '当用户要求报表、报告、数据分析、dashboard、复盘
 - ❌ 用 Chrome/Playwright 截图自检
 - ❌ 多次调用 `entity-aggregate`（每实体最多 1 次）
 
-**聊天输出：只说"报告已生成"。** HTML 文件就是报告，不要输出分析/代码块。
-
----
+**聊天输出：只说“报告已生成”。** HTML 文件就是报告，不要输出分析/代码块。
 
 ## 第 1 步：取数据
 
@@ -62,8 +60,6 @@ entity-aggregate(order, 最近30天)        ← 第3次 禁止！
 ... 共12次 aggregate 调用 ← 反模式
 ```
 
----
-
 ## 第 2 步：选择图表
 
 | 意图 | ECharts type |
@@ -73,8 +69,6 @@ entity-aggregate(order, 最近30天)        ← 第3次 禁止！
 | 占比/份额 | `pie` |
 | 多维画像 | `radar` |
 | 阶段/漏斗 | `funnel` |
-
----
 
 ## 第 3 步：组装 JSON
 
@@ -110,8 +104,6 @@ entity-aggregate(order, 最近30天)        ← 第3次 禁止！
 { "title": "近8周商机数", "id": "chart-0", "hint": "第6周峰值42笔", "option": { "xAxis": { "type": "category", "data": ["W1","W2","W3","W4","W5","W6","W7","W8"] }, "yAxis": { "type": "value" }, "series": [{ "type": "bar", "data": [28,32,25,30,35,42,38,33] }] } }
 ```
 
----
-
 ## 第 4 步：嵌入模板
 
 1. 用 Read 读取内置模板（`report.html` 或 `chart.html`）
@@ -129,8 +121,6 @@ entity-aggregate(order, 最近30天)        ← 第3次 禁止！
 
 **只替换 `null`，不改其他代码。**
 
----
-
 ## 内容规则
 
 - 报告范围：3-5 章节（6-10 图表）
@@ -142,8 +132,6 @@ entity-aggregate(order, 最近30天)        ← 第3次 禁止！
 - 饼图 radius: '60%'，数据降序
 - 坐标轴单位始终显示：axisLabel.formatter
 - 数据标签：label.show = true，柱/线 position: 'top'
-
----
 
 ## 专业特性
 
