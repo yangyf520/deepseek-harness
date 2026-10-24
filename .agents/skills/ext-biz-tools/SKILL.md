@@ -1,6 +1,6 @@
 ---
 name: ext-biz-tools
-description: 跨系统业务工具使用指南——查询、录入、执行、分析、决策、协调的通用模式（适用于 MCP、数据库、API 等任何外部工具）
+description: 当用户需要通过外部业务系统（CRM、ERP、OA 等）查询、录入、执行或分析数据时使用。提供取数策略、工具识别、错误处理的通用模式（适用于 MCP、数据库、API 等任何外部工具）
 ---
 
 # 跨系统业务工具使用指南
@@ -37,8 +37,9 @@ description: 跨系统业务工具使用指南——查询、录入、执行、�
 # 1. 计算时间范围（覆盖所有需要的周期，如 60 天）
 import datetime
 tz = datetime.timezone(datetime.timedelta(hours=8))
-end = datetime.datetime(2026, 10, 23, 23, 59, 59, tzinfo=tz)
-start = datetime.datetime(2026, 8, 24, 0, 0, 0, tzinfo=tz)
+today = datetime.date.today()
+end = datetime.datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=tz)
+start = end - datetime.timedelta(days=60)
 start_ms, end_ms = int(start.timestamp()*1000), int(end.timestamp()*1000)
 
 # 2. 批量拉取原始数据（每个实体只调 1 次 entity-search）
@@ -55,12 +56,6 @@ for row in data:
 # 4. 组装结果
 result = {"by_status": by_status, "total": len(data)}
 ```
-
-## 查询优化
-
-- **优先多维 GROUP BY**：一次查询返回多个维度的交叉分析
-- **时间序列一次查完**：用 `DATE_TRUNC('week', createdAt)` 一次返回所有周的数据
-- **多视图场景**：根据用户意图选择视图（如 `*_owner` / `*_all` / `*_approval`），不确定时主动询问
 
 ## 错误处理
 
