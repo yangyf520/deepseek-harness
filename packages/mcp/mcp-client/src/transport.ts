@@ -8,9 +8,9 @@
 
 import type { Transport } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { StreamableHTTPClientTransport, type StreamableHTTPClientTransportOptions } from '@modelcontextprotocol/client'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
-import type { Config } from './index.ts'
+import type { StdioConfig, StreamableHttpConfig } from './index.ts'
 
 /**
  * The subprocess seam's scrubbed parent env (credential-shaped and stale
@@ -23,12 +23,23 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
 }
 
 /**
+ * Options for creating a transport, beyond what the plugin config provides.
+ * Used by the connection supervisor to inject per-connection capabilities
+ * such as dynamic headers for token renewal.
+ */
+export interface TransportExtras {
+  /** Returns current headers; called per-request to pick up renewed tokens. */
+  headersProvider?: () => Record<string, string>
+}
+
+/**
  * Create an MCP transport from the resolved plugin config.
  *
  * @param config - Resolved plugin config discriminated on `transport`.
+ * @param extras - Optional per-connection overrides (e.g. authProvider).
  * @returns A connected-ready MCP Transport (stdio or Streamable HTTP).
  */
-export function createTransport(config: Config): Transport {
+export function createTransport(config: StdioConfig | StreamableHttpConfig, extras?: TransportExtras): Transport {
   switch (config.transport) {
     case 'stdio':
       return new StdioClientTransport({
@@ -37,10 +48,13 @@ export function createTransport(config: Config): Transport {
         env: buildChildEnv(config.env),
         cwd: config.cwd,
       })
-    case 'streamable-http':
-      return new StreamableHTTPClientTransport(
-        new URL(config.url),
-        { requestInit: { headers: config.headers } },
-      )
+    case 'streamable-http': {
+      const httpOpts: StreamableHTTPClientTransportOptions = {
+        requestInit: extras?.headersProvider
+          ? { get headers() { return extras.headersProvider?.() ?? {} } }
+          : { headers: config.headers },
+      }
+      return new StreamableHTTPClientTransport(new URL(config.url), httpOpts)
+    }
   }
 }

@@ -36,20 +36,20 @@ describe('ACP MCP declaration mapping', () => {
     expect(configs).toHaveLength(2)
     expect(configs[0]).toMatchObject({
       transport: 'stdio',
+      serverName: expect.stringMatching(/^Fancy_server_[0-9a-f]{8}$/),
       command: process.execPath,
       args: ['server.js'],
       env: { TOKEN: 'secret' },
       cwd: process.cwd(),
       failOnStartupError: true,
     })
-    expect(configs[0]?.serverName).toMatch(/^Fancy_server_[0-9a-f]{8}$/)
     expect(configs[1]).toMatchObject({
       transport: 'streamable-http',
+      serverName: expect.stringMatching(/^server_[0-9a-f]{8}$/),
       url: 'https://example.test/mcp',
       headers: { Authorization: 'Bearer token' },
       failOnStartupError: true,
     })
-    expect(configs[1]?.serverName).toMatch(/^server_[0-9a-f]{8}$/)
   })
 
   it.each([

@@ -14,7 +14,8 @@
 
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { specTypeSchemas, type Client, type ImageContent } from '@modelcontextprotocol/client'
+import { spawn } from 'node:child_process'
+import { specTypeSchemas, SdkHttpError, UnauthorizedError, ProtocolError, type Client, type ImageContent } from '@modelcontextprotocol/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
@@ -24,12 +25,60 @@ import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
+/** Detect 401 / authentication errors from the MCP SDK. */
+function isAuthError(error: unknown): boolean {
+  if (error instanceof UnauthorizedError) return true
+  if (error instanceof SdkHttpError && error.data?.status === 401) return true
+  if (error instanceof Error && error.name === 'UnauthorizedError') return true
+  return false
+}
+
+/**
+ * Detect MCP session expiry errors (JSON-RPC -32600 with session-shaped message).
+ * The gateway recycles session IDs after inactivity; the fix is to reconnect,
+ * not to renew the JWT token (which may still be valid).
+ */
+function isSessionError(error: unknown): boolean {
+  if (error instanceof ProtocolError && error.code === -32600) {
+    return /session|invalid.*mcp.*session/i.test(error.message)
+  }
+  if (error instanceof Error) {
+    return /missing or invalid mcp-session-id/i.test(error.message)
+  }
+  return false
+}
+
+/**
+ * Per-connection state for the gateway egress authorization flow: the URL whose
+ * page is already open, so one flow opens one browser window and a later flow
+ * opens its own.
+ */
+export interface EgressAuthFlow {
+  /** Authorization URL already opened for this connection. */
+  openedUrl?: string
+}
+
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
   /** Whether a registry conflict is contained or rejects this synchronization. */
   registrationFailure: 'contain' | 'throw'
   serverName: string
   toolCallTimeoutMs: number
+  /**
+   * Renew an expired token and re-establish the connection.
+   * Returns true if renewal succeeded and a fresh client is available via `currentClient`.
+   */
+  renewToken?: () => Promise<boolean>
+  /** Return the current active client (updated after token renewal + reconnect). */
+  currentClient?: () => Client | undefined
+  /**
+   * Re-establish the connection with a fresh MCP session ID.
+   * Used when the gateway recycles the session (e.g. after inactivity) but the
+   * JWT token is still valid. Returns true if reconnection succeeded.
+   */
+  reconnect?: () => Promise<boolean>
+  /** Egress authorization state shared by every tool of one connection. */
+  egressAuth?: EgressAuthFlow | undefined
 }
 
 /** State for one sync generation: the current set of disposers keyed by public name. */
@@ -135,10 +184,46 @@ export async function syncTools(
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
       taskRequired: tool.execution?.taskSupport === 'required',
-      call: (args, execution) => client.callTool(
-        { name: tool.name, arguments: args },
-        { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
-      ),
+      egressAuth: opts.egressAuth,
+      call: async (args, execution) => {
+        const activeClient = opts.currentClient?.() ?? client
+        let reconnecting = false
+        try {
+          return await activeClient.callTool(
+            { name: tool.name, arguments: args },
+            { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+          )
+        } catch (callError) {
+          // MCP session expired: reconnect with a fresh session and retry once.
+          if (opts.reconnect && opts.currentClient && isSessionError(callError) && !reconnecting) {
+            reconnecting = true
+            const reconnected = await opts.reconnect()
+            if (reconnected) {
+              const freshClient = opts.currentClient()
+              if (freshClient) {
+                return await freshClient.callTool(
+                  { name: tool.name, arguments: args },
+                  { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+                )
+              }
+            }
+          }
+          // Token expired mid-session: renew and retry once with a fresh client.
+          if (opts.renewToken && opts.currentClient && isAuthError(callError)) {
+            const renewed = await opts.renewToken()
+            if (renewed) {
+              const freshClient = opts.currentClient()
+              if (freshClient) {
+                return await freshClient.callTool(
+                  { name: tool.name, arguments: args },
+                  { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+                )
+              }
+            }
+          }
+          throw callError
+        }
+      },
     }))
   }
 
@@ -206,6 +291,8 @@ export interface McpToolDefinitionOptions {
   outputSchema?: unknown
   /** Whether the upstream tool requires the unsupported task execution extension. */
   taskRequired?: boolean
+  /** Egress authorization state shared by every tool of one connection. */
+  egressAuth?: EgressAuthFlow | undefined
   /**
    * Obtain one raw MCP result from the provider.
    * @param args - model arguments admitted by the ToolRuntime.
@@ -265,9 +352,85 @@ function createOutput(rawName: string, structuredSchema: JsonSchemaNode | undefi
   }
 }
 
+/** Extract an egress OAuth connect URL from tool error text, if present. */
+function extractAuthUrl(text: string): string | undefined {
+  return text.match(/https?:\/\/[^\s"'<>]+oauth2\/egress\/connect[^\s"'<>]*/i)?.[0]
+}
+
+/**
+ * Open `url` in the user's default browser without a shell. The URL arrives in
+ * gateway error text, so it reaches the launcher as one argument-vector entry
+ * instead of a command string; the repository has no host-side URL opener.
+ * `rundll32` avoids the extra `cmd` parsing `start` would require.
+ * @param url - authorization URL to open.
+ * @param ctx - context carrying the logger.
+ */
+function openBrowser(url: string, ctx: Context): void {
+  const [command, args] = process.platform === 'darwin'
+    ? ['open', [url]]
+    : process.platform === 'win32'
+      ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
+      : ['xdg-open', [url]]
+  spawn(command, args, { detached: true, stdio: 'ignore' })
+    .on('error', error => ctx.logger.warn(`Failed to open authorization page: ${String(error)}`))
+    .unref()
+}
+
+/**
+ * When the gateway returns an egress authorization prompt, open the browser
+ * once per flow and poll by retrying the tool call until the user completes
+ * sign-in or we time out. Returns the real tool result on success.
+ * @param authUrl - egress authorization URL from the gateway error text.
+ * @param argsObj - original tool arguments, replayed while polling.
+ * @param call - raw upstream call replayed while polling.
+ * @param exec - exact ToolRuntime invocation, for cancellation.
+ * @param ctx - context carrying the logger.
+ * @param flow - per-connection state recording the already-opened URL.
+ * @returns the upstream result once authorization completes.
+ * @throws when the invocation is cancelled or authorization does not complete in time.
+ */
+async function handleEgressAuth(
+  authUrl: string,
+  argsObj: Record<string, unknown>,
+  call: (args: Record<string, unknown>, execution: ToolExecution) => Promise<unknown>,
+  exec: ToolExecution,
+  ctx: Context,
+  flow: EgressAuthFlow,
+): Promise<unknown> {
+  if (flow.openedUrl !== authUrl) {
+    flow.openedUrl = authUrl
+    ctx.logger.info(`Opening authorization page: ${authUrl}`)
+    openBrowser(authUrl, ctx)
+  } else {
+    ctx.logger.info(`Authorization page already opened, waiting for user to complete sign-in at: ${authUrl}`)
+  }
+
+  // Poll by retrying the tool call. Once the user authorizes in the browser,
+  // the gateway will forward the call to the upstream server and return data.
+  const maxAttempts = 24
+  const intervalMs = 5_000
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+    if (exec.signal?.aborted) {
+      throw new Error('Waiting for authorization was interrupted. The authorization page is still open in your browser — complete the sign-in there, then ask your question again.')
+    }
+    try {
+      const retryResult = await call(argsObj, exec)
+      const retryParsed = specTypeSchemas.CallToolResult['~standard'].validate(retryResult)
+      if (retryParsed.issues === undefined && retryParsed.value.isError !== true) {
+        return retryResult
+      }
+    } catch {
+      // Authorization not yet complete; keep polling.
+    }
+  }
+  throw new Error(`Authorization timed out after ${Math.round(maxAttempts * intervalMs / 1000)}s. Please open this URL in your browser to complete authorization: ${authUrl}`)
+}
+
 /**
  * Invoke the caller-owned raw-result callback and prepare canonical content.
  * MCP isError results reject before image storage so ToolRuntime records failure.
+ * Gateway egress authorization prompts trigger automatic browser open + poll.
  */
 function createExecutor(
   ctx: Context,
@@ -293,24 +456,49 @@ function createExecutor(
     const content = result.content as unknown as JsonValue[]
     const text = extractText(content, rawName)
 
-    // MCP isError → throw so ToolRuntime produces an isError result for the model.
+    // MCP isError → handle authorization or throw.
     if (result.isError === true) {
+      const authUrl = extractAuthUrl(text)
+      if (authUrl) {
+        // Gateway egress oauth_user mode: user hasn't authorized yet.
+        // Open browser and poll until they complete sign-in.
+        const authResult = await handleEgressAuth(authUrl, argsObj, options.call, exec, ctx, options.egressAuth ?? {})
+        // Re-validate the successful retry result through the normal path.
+        const authParsed = specTypeSchemas.CallToolResult['~standard'].validate(authResult)
+        if (authParsed.issues !== undefined) {
+          throw new Error(`Tool "${rawName}" returned an invalid MCP result after authorization: ${authParsed.issues.map(issue => issue.message).join('; ')}`)
+        }
+        // Replace result with the authorized response and continue to normal processing.
+        return await processResult(ctx, authParsed.value, rawName, exec, projections)
+      }
       throw new Error(text)
     }
 
-    const value: McpResult = {
-      content,
-      ...result.structuredContent !== undefined
-        ? { structuredContent: result.structuredContent as JsonValue }
-        : {},
-    }
-    if (containsImage(content)) {
-      const fallback: ContentBlock[] = [{ type: 'text', text: extractText(content, rawName) }]
-      const projected = await prepareImageProjection(ctx, exec, content, rawName)
-      projections.set(exec, { value, fallback, content: projected })
-    }
-    return value
+    return await processResult(ctx, result, rawName, exec, projections)
   }
+}
+
+/** Process a validated MCP result into the canonical McpResult shape. */
+async function processResult(
+  ctx: Context,
+  result: { content: unknown; structuredContent?: unknown },
+  rawName: string,
+  exec: ToolExecution,
+  projections: WeakMap<ToolExecution, PreparedProjection>,
+): Promise<McpResult<JsonValue>> {
+  const content = result.content as unknown as JsonValue[]
+  const value: McpResult = {
+    content,
+    ...result.structuredContent !== undefined
+      ? { structuredContent: result.structuredContent as JsonValue }
+      : {},
+  }
+  if (containsImage(content)) {
+    const fallback: ContentBlock[] = [{ type: 'text', text: extractText(content, rawName) }]
+    const projected = await prepareImageProjection(ctx, exec, content, rawName)
+    projections.set(exec, { value, fallback, content: projected })
+  }
+  return value
 }
 
 /** Whether an untrusted MCP content array contains a declared image block. */
