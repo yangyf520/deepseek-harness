@@ -65,7 +65,7 @@ function HtmlFrame({ data, resourceAddress, readRelated, addResource, setResourc
     return <LoadingIndicator label={t('loading')} />
   }
   if (frame.url === undefined) return <p className={css.status} role="alert">{t('failed')}</p>
-  return <iframe key={frame.url} name={frameName} className={css.frame} src={frame.url} sandbox="allow-scripts" title={t('frame')} data-html-preview />
+  return <iframe key={frame.url} name={frameName} className={css.frame} src={frame.url} sandbox="allow-scripts allow-modals allow-downloads" title={t('frame')} data-html-preview />
 }
 
 /**
