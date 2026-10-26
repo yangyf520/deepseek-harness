@@ -6,6 +6,10 @@ apps/desktop/*.p12
 node_modules/
 lib/
 *.tsbuildinfo
+# Stray tsc output that lands next to source (sourceMap/declarationMap on).
+src/**/*.js
+src/**/*.d.ts
+src/**/*.map
 pnpm-debug.log
 .pnpm-store/
 .cache/
