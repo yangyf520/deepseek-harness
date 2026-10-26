@@ -34,6 +34,7 @@ import type {
   SessionWireEvent,
 } from './types.ts'
 import { SessionAssistantStreamAccumulator } from './assistant-stream.ts'
+import { isSessionVisibleToTenant } from './tenant-visibility.ts'
 
 const DEFAULT_MAX_MESSAGES = 50
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
@@ -252,6 +253,12 @@ export class SessionHistoryController {
         projectionMode: withProjections || address.kind === 'subagent' ? 'all' : 'none',
       })
       if (observation.header.cwd === undefined) {
+        observation[Symbol.dispose]()
+        rejectNotFound(address)
+      }
+      // A Session outside the caller's tenant scope answers like an absent one,
+      // so neither its history nor its later events are readable.
+      if (!isSessionVisibleToTenant(this.ctx, observation.header.cwd)) {
         observation[Symbol.dispose]()
         rejectNotFound(address)
       }

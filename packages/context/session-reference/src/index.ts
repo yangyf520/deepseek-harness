@@ -38,6 +38,12 @@ import { formatSessionReferenceMention, parseSessionReferenceText } from './uri.
 
 export type * from './types.ts'
 export type { Config, SessionReferenceErrorCode } from './config.ts'
+
+/** The subset of the `authTenant` service this resolver reads. */
+interface SessionReferenceTenant {
+  /** Whether one session's cwd is visible to the current request. */
+  sessionVisible(cwd: string | undefined): boolean
+}
 export {
   DEFAULT_CANDIDATE_LIMIT,
   DEFAULT_MAX_REFERENCE_BYTES,
@@ -202,7 +208,9 @@ export class SessionReferenceResolver extends TypertRemoteService {
     const needle = query.toLocaleLowerCase()
     const targetCwd = agent.session.header.cwd
     assertNotCancelled(signal)
-    const records = (await settleWithCancellation(this.ctx.sessionQuery.listSessions(signal), signal))
+    const all = await settleWithCancellation(this.ctx.sessionQuery.listSessions(signal), signal)
+    const tenant = this.tenant()
+    const records = all.filter(record => tenant === undefined || tenant.sessionVisible(record.header.cwd))
       .filter(record => record.header.id !== agent.id)
       .map((record, index) => ({ record, index }))
     const labelled = this.projectedLabels(records)
@@ -302,6 +310,29 @@ export class SessionReferenceResolver extends TypertRemoteService {
     }))
   }
 
+  /** The tenant gate, absent in single-user compositions. */
+  private tenant(): SessionReferenceTenant | undefined {
+    return this.ctx.reflect.get('authTenant') as SessionReferenceTenant | undefined
+  }
+
+  /**
+   * Read one referenced session, refusing a session outside the caller's scope.
+   * Candidate discovery already filters, so this refusal covers a caller that
+   * supplied an id directly.
+   * @param sessionId - referenced session to load.
+   * @returns the surface the citation renders from.
+   */
+  private async readSurfaceWithinScope(sessionId: SessionId): Promise<SessionSurfaceSnapshot> {
+    const surface = await this.ctx.sessionQuery.readSurface(sessionId)
+    if (this.tenant()?.sessionVisible(surface.session.cwd) === false) {
+      throw new SessionReferenceError(
+        `session "${sessionId}" is outside your scope`,
+        'SESSION_REFERENCE_INVALID_REFERENCE',
+      )
+    }
+    return surface
+  }
+
   /**
    * Snapshot all references for one accepted direct message and return one aggregated durable context.
    * Automatic budgets use the last assembled route, or agent options before any assembly.
@@ -331,7 +362,7 @@ export class SessionReferenceResolver extends TypertRemoteService {
       prepared = await settleWithCancellation(
         Promise.all(inputs.map(async input => ({
           input,
-          snapshot: await this.ctx.sessionQuery.readSurface(input.sessionId),
+          snapshot: await this.readSurfaceWithinScope(input.sessionId),
         }))),
         signal,
       )

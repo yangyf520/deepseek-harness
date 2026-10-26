@@ -21,6 +21,7 @@
 
 import { posix, win32 } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-fs'
 import type { FsDirEntry, FsInfo, FsPathInfo, FsTarget } from '@deepseek-ai/dsh-fs'
@@ -213,6 +214,9 @@ export class WorkspaceFiles extends TypertRemoteService {
             : undefined
           const header = live ?? stored?.header
           if (header === undefined) return undefined
+          // A Session outside the caller's tenant scope resolves like an unknown
+          // one, so no endpoint ever receives another tenant's workspace root.
+          if (!new TenantGuard(scope).sessionVisible(header.cwd)) return undefined
           return {
             sessionId,
             workspaceRoot: header.cwd ?? scope.sandboxPolicy.workspaceRoot,
@@ -423,6 +427,11 @@ export class WorkspaceFiles extends TypertRemoteService {
       throw new RemoteError('workspace-file/not-regular-file', `"${path}" is a ${entry.type}`, { path, kind: entry.type })
     }
     const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
+    // The filesystem backend has no tenant opinion, so a Remote read names any
+    // path the process can reach; this is where the caller's own roots apply.
+    if (!new TenantGuard(this.ctx).visible(this.ctx.fs.processPath(target))) {
+      throw new RemoteError('workspace-file/outside-workspace', `"${path}" is outside your tenant scope`, { path })
+    }
     const info = await this.ctx.fs.stat(target, signal)
     if (info === undefined) {
       throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })

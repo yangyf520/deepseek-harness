@@ -42,6 +42,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** The session's job list no longer carries a killable row under that id. */
     'job/not-found': { readonly sessionId: SessionId; readonly jobId: JobId }
+    /** The named session lies outside the caller's tenant scope. */
+    'job/session-forbidden': { readonly sessionId: SessionId }
   }
 }
 

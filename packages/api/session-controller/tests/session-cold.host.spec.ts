@@ -124,6 +124,31 @@ describe('sessions.list cold merge', () => {
     }
   })
 
+  it('lists only the cold Sessions inside the caller tenant scope', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const metas = [
+      header('tenant-mine', 100, { cwd: '/tenant/a/project' }),
+      header('tenant-foreign', 200, { cwd: '/tenant/b/project' }),
+    ]
+    providePersistence(ctx, { list: () => Promise.resolve(metas) })
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'p', model: 'm' }),
+      cwd: '/tmp',
+    })
+    ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: (cwd?: string) => cwd === '/tenant/a/project',
+      isSystemAdmin: () => false,
+    })
+
+    const response = await remote.list(request({}))
+
+    if (!response.ok) throw new Error('list failed')
+    expect(response.value.items.map(item => item.sessionId)).toEqual([sid('tenant-mine')])
+    await ctx.fiber.dispose()
+  })
+
   it('uses a predecessor title hint with zero cold stat or body reads', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)

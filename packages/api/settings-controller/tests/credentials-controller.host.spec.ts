@@ -38,6 +38,19 @@ async function boot(
   return ctx.credentialsController
 }
 
+/** A boot inside a tenant request, where only an administrator may write. */
+async function bootInTenant(isSystemAdmin: boolean): Promise<CredentialsController> {
+  const ctx = new Context()
+  await ctx.plugin(MemoryCredentials, {})
+  await ctx.plugin(CredentialsController)
+  ctx.provide('authTenant', {
+    visible: () => true,
+    sessionVisible: () => true,
+    isSystemAdmin: () => isSystemAdmin,
+  })
+  return ctx.credentialsController
+}
+
 describe('the credentials Remote namespace a configuration surface calls', () => {
   it('publishes the credentials namespace from its own service key', async () => {
     const controller = await boot()
@@ -134,5 +147,32 @@ describe('the credentials Remote namespace a configuration surface calls', () =>
     const controller = await boot({}, LiteralRejectingCredentials)
     const failure = await controller.set('DEEPSEEK_API_KEY', 'sk-live').catch((error: unknown) => error)
     expect(remoteErrorOf(failure)?.message).toBe('the store refused')
+  })
+
+  it('gives a tenant member a read-only view and refuses shared-credential writes', async () => {
+    const controller = await bootInTenant(false)
+
+    expect(await controller.describe(['DEEPSEEK_API_KEY']))
+      .toEqual({ DEEPSEEK_API_KEY: { configured: false, writable: false } })
+    for (const call of [
+      () => controller.set('DEEPSEEK_API_KEY', 'sk-live'),
+      () => controller.unset('DEEPSEEK_API_KEY'),
+    ]) {
+      const failure = await call().catch((error: unknown) => error)
+      expect(remoteErrorOf(failure)).toMatchObject({
+        code: 'credential/forbidden',
+        details: { ref: 'DEEPSEEK_API_KEY' },
+      })
+    }
+  })
+
+  it('keeps shared credentials writable for a system administrator', async () => {
+    const controller = await bootInTenant(true)
+
+    expect(await controller.describe(['DEEPSEEK_API_KEY']))
+      .toEqual({ DEEPSEEK_API_KEY: { configured: false, writable: true } })
+    await controller.set('DEEPSEEK_API_KEY', 'sk-live')
+    expect(await controller.describe(['DEEPSEEK_API_KEY']))
+      .toEqual({ DEEPSEEK_API_KEY: { configured: true, source: 'memory', writable: true } })
   })
 })

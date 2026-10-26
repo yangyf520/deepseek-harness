@@ -25,6 +25,12 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
      * never the value.
      */
     'credential/rejected': { readonly ref: string }
+    /**
+     * The caller may not change this credential: the document is deployment-wide,
+     * so a tenant member's write would change how every other tenant authenticates.
+     * The details name only the reference, never the value.
+     */
+    'credential/forbidden': { readonly ref: string }
   }
 }
 

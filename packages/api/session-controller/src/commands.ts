@@ -1,6 +1,7 @@
 /** Session commands whose activation policy is explicit at each Remote method. */
 
 import { modelAvailable } from './catalog.ts'
+import { assertCwdVisible, isSessionVisibleToTenant, sessionNotVisible } from './tenant-visibility.ts'
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -91,6 +92,9 @@ function latestCompletedPrefixBoundary(events: readonly SessionEvent[]): Session
 
 /** Implements Session business commands delegated by the Session Controller Remote service. */
 export class SessionCommandController {
+  /** Prompts admitted but not yet delivered, so a concurrent retry of one request id is admitted once. */
+  private readonly prompts = new WeakMap<Agent, Set<SessionRequestId>>()
+
   /**
    * @param ctx - Host context carrying Agent, model, attachment, title, and Workspace services.
    * @param agents - sole owner of create, resume, and Session-local model selection.
@@ -122,6 +126,7 @@ export class SessionCommandController {
       }
     }
     const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+    assertCwdVisible(this.ctx, cwd)
     let created: ApiSessionCreated
     try {
       created = await this.agents.createSession({
@@ -248,6 +253,7 @@ export class SessionCommandController {
       )
     }
     using source = observed
+    this.requireVisibleSession(source.header.cwd, request.sessionId)
     const boundary = atSeq ?? latestCompletedPrefixBoundary(source.events)
     if (boundary === undefined || source.events[boundary]?.seq !== boundary) {
       throw new RemoteError(
@@ -319,47 +325,57 @@ export class SessionCommandController {
   async prompt(request: SessionPromptRequest, source: MessageSource): Promise<SessionPromptValue> {
     const agent = await this.resolveAgent(request.sessionId)
     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
-    const hasImage = request.content.some(part => part.type === 'image')
-    const admit = async (): Promise<SessionPromptValue> => {
-      try {
-        if (hasImage) {
-          const current = this.agents.selectionFor(agent).current
-          const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
-          if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+    const inFlight = this.prompts.get(agent)
+    if (inFlight?.has(request.requestId) === true) return { accepted: true }
+    const pending = inFlight ?? new Set<SessionRequestId>()
+    pending.add(request.requestId)
+    this.prompts.set(agent, pending)
+    try {
+      const hasImage = request.content.some(part => part.type === 'image')
+      const admit = async (): Promise<SessionPromptValue> => {
+        try {
+          if (hasImage) {
+            const current = this.agents.selectionFor(agent).current
+            const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
+            if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+              throw new RemoteError(
+                'session/attachment-invalid',
+                `Model "${current.model}" does not support image input.`,
+                { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+              )
+            }
+          }
+          const admission = resolvePromptFileReceipts(
+            request.content,
+            receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
+          )
+          const content = await this.ctx.attachments.admitPromptContent(admission.content)
+          const message: UserMessage = createUserMessage({ content, source })
+          if (this.ctx.agents.get(agent.id) !== agent) {
             throw new RemoteError(
-              'session/attachment-invalid',
-              `Model "${current.model}" does not support image input.`,
-              { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+              'session/not-found',
+              `session "${agent.id}" was disposed during prompt admission`,
+              { sessionId: agent.id },
             )
           }
+          using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
+          if (request.mode === 'steer') agent.steer(message)
+          else agent.followup(message)
+          binding.commit()
+        } catch (error) {
+          if (remoteErrorOf(error) !== undefined) throw error
+          if (error instanceof AttachmentError) {
+            throw new RemoteError('session/attachment-invalid', error.message, { reason: error.code })
+          }
+          throw new RemoteError('session/agent-busy', 'prompt rejected', { reason: String(error) })
         }
-        const admission = resolvePromptFileReceipts(
-          request.content,
-          receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
-        )
-        const content = await this.ctx.attachments.admitPromptContent(admission.content)
-        const message: UserMessage = createUserMessage({ content, source })
-        if (this.ctx.agents.get(agent.id) !== agent) {
-          throw new RemoteError(
-            'session/not-found',
-            `session "${agent.id}" was disposed during prompt admission`,
-            { sessionId: agent.id },
-          )
-        }
-        using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
-        if (request.mode === 'steer') agent.steer(message)
-        else agent.followup(message)
-        binding.commit()
-      } catch (error) {
-        if (remoteErrorOf(error) !== undefined) throw error
-        if (error instanceof AttachmentError) {
-          throw new RemoteError('session/attachment-invalid', error.message, { reason: error.code })
-        }
-        throw new RemoteError('session/agent-busy', 'prompt rejected', { reason: String(error) })
+        return { accepted: true }
       }
-      return { accepted: true }
+      return hasImage ? await this.agents.serializeImageAdmission(agent, admit) : await admit()
+    } finally {
+      pending.delete(request.requestId)
+      if (pending.size === 0) this.prompts.delete(agent)
     }
-    return hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit()
   }
 
   private async requireModel(selection: Pick<AgentModelSelection, 'provider' | 'model'>): Promise<void> {
@@ -382,6 +398,7 @@ export class SessionCommandController {
       if (error instanceof ApiSessionNotFound) {
         throw new RemoteError('session/not-found', error.message, { sessionId: request.sessionId })
       }
+      if (remoteErrorOf(error) !== undefined) throw error
       throw new RemoteError(
         'gateway/internal',
         `attachment authorization unavailable for session "${request.sessionId}": ${String(error)}`,
@@ -442,6 +459,7 @@ export class SessionCommandController {
       }
       agent = found.agent
     }
+    this.requireVisibleSession(agent.session.header.cwd, request.sessionId)
     if (hasApiSessionSubagentOwner(this.ctx, agent.session, agent)) {
       const identity = this.ctx.sessionProjections
         .snapshot(agent.session, ['subagent'])
@@ -513,7 +531,18 @@ export class SessionCommandController {
   private async resolveAgent(sessionId: SessionId): Promise<Agent> {
     const found = await this.agents.resolveAgent(sessionId)
     if ('error' in found) throw found.error
+    this.requireVisibleSession(found.agent.session.header.cwd, sessionId)
     return found.agent
+  }
+
+  /**
+   * Refuse a Session whose logged cwd lies outside the caller's tenant scope.
+   * @param cwd - Session cwd the decision reads.
+   * @param sessionId - Session identity named in the failure.
+   * @throws RemoteError 'session/not-visible' when the cwd is outside the scope.
+   */
+  private requireVisibleSession(cwd: string | undefined, sessionId: SessionId): void {
+    if (!isSessionVisibleToTenant(this.ctx, cwd)) throw sessionNotVisible(sessionId)
   }
 
   private rejectCreation(error: unknown): never {
@@ -540,10 +569,12 @@ export class SessionCommandController {
   private async readSessionState(sessionId: SessionId): Promise<SessionReadState> {
     const attached = this.ctx.sessions.get(sessionId)
     if (attached !== undefined) {
+      this.requireVisibleSession(attached.header.cwd, sessionId)
       // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       return { id: attached.id, header: attached.header, events: attached.snapshotEvents() }
     }
     const inspected = await inspectApiSession(this.ctx, sessionId)
+    this.requireVisibleSession(inspected.meta.cwd, sessionId)
     return { id: inspected.meta.id, header: inspected.meta, events: inspected.events }
   }
 

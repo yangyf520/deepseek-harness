@@ -18,6 +18,7 @@
     { "path": "../../core/agent" },
     { "path": "../../core/session" },
     { "path": "../../jobs/jobs" },
-    { "path": "../../typert/protocol" }
+    { "path": "../../typert/protocol" },
+    { "path": "../remote-access/tsconfig.host.json" }
   ]
 }

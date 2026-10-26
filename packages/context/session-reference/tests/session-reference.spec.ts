@@ -333,6 +333,21 @@ describe('session reference spill outcomes', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
+  it('refuses a directly supplied reference outside the tenant scope', async () => {
+    const ctx = await harness()
+    try {
+      const target = ctx.sessions.create(SessionId('target'))
+      const source = ctx.sessions.create(SessionId('source'), { meta: { createdAt: 0, cwd: '/tenant/b/project' } })
+      const sessionVisible = vi.fn(() => false)
+      ctx.provide('authTenant', { sessionVisible })
+      const failure = await ctx.sessionReferenceResolver.prepare(fakeAgent(target), [], [{ sessionId: source.id }])
+        .catch((error: unknown) => error)
+      expect(failure).toMatchObject({ code: 'SESSION_REFERENCE_READ_FAILED' })
+      expect(failure instanceof Error ? failure.message : '').toContain('outside your scope')
+      expect(sessionVisible).toHaveBeenCalledWith('/tenant/b/project')
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it.each([
     ['huge single message', ['head\n' + '界😀'.repeat(10000) + '\ntail'], 360],
     ['whole dropped messages', ['old ' + '界'.repeat(300), 'new fact'], 180],
@@ -810,6 +825,18 @@ describe('session reference discovery and preparation', () => {
     await expect(ctx.sessionReferenceResolver.listCandidates(fakeAgent(target), 'anything')).resolves.toEqual([])
     expect(readTitles).not.toHaveBeenCalled()
     vi.restoreAllMocks()
+  })
+
+  it('lists only candidates inside the tenant scope', async () => {
+    const ctx = await harness()
+    try {
+      const target = ctx.sessions.create(SessionId('target'), { meta: { cwd: '/tenant/a' } })
+      const mine = ctx.sessions.create(SessionId('mine'), { meta: { cwd: '/tenant/a' } })
+      ctx.sessions.create(SessionId('foreign'), { meta: { cwd: '/tenant/b' } })
+      ctx.provide('authTenant', { sessionVisible: (cwd?: string) => cwd === '/tenant/a' })
+      await expect(ctx.sessionReferenceResolver.listCandidates(fakeAgent(target), '', 10))
+        .resolves.toEqual([expect.objectContaining({ sessionId: mine.id })])
+    } finally { await ctx.fiber.dispose() }
   })
 
   it('labels every session by id when no projection face is composed', async () => {

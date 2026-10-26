@@ -5,6 +5,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import { Deque } from '@deepseek-ai/dsh-deque'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { FsObservation, FsTarget } from '@deepseek-ai/dsh-fs'
@@ -63,6 +64,11 @@ export class WorkspaceChangeFeed {
         throw error
       })
       if (target === undefined || aborted()) return
+      // Watches follow the backend's read authority for files, so this is where
+      // the caller's own roots bound a path outside the workspace.
+      if (!new TenantGuard(this.ctx).visible(this.ctx.fs.processPath(target))) {
+        throw new RemoteError('workspace-file/outside-workspace', `"${path}" is outside your tenant scope`, { path })
+      }
       const stat = async () => {
         const info = await this.ctx.fs.stat(target, signal).catch((error: unknown) => {
           if (aborted()) return undefined

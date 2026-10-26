@@ -101,6 +101,24 @@ function pageEvents(page: SessionPage): SessionWireEvent[] {
   return page.records.map(record => record.event)
 }
 
+describe('Session history tenant scope', () => {
+  it('answers a Session outside the caller tenant scope as absent', async () => {
+    const { ctx } = await harness()
+    const session = ctx.sessions.create(undefined, { meta: { cwd: '/workspace' } })
+    ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+    const history = new SessionHistoryController(ctx, (observation) => { observation[Symbol.dispose]() })
+    await expect(history.page({
+      address: { kind: 'session', sessionId: session.id },
+      throughSeq: -1,
+    }, new AbortController().signal)).rejects.toMatchObject({ code: 'session/not-found' })
+    await ctx.fiber.dispose()
+  })
+})
+
 describe('Session history raw journal', () => {
   it('opens an empty opted-in Assistant baseline before any live attempt exists', async () => {
     const { ctx } = await harness()

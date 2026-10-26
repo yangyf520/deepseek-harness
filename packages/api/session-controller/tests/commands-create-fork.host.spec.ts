@@ -293,3 +293,41 @@ describe('Session fork failures', () => {
     await ctx.fiber.dispose()
   })
 })
+
+describe('Session command tenant scope', () => {
+  it('refuses a cwd outside the caller tenant scope before creation', async () => {
+    const ctx = await baseContext()
+    ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [] } as never)
+    ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    const controller = new SessionCommandController(ctx, controllerAgents(ctx), '/default')
+
+    await expect(controller.create({ cwd: '/other-tenant' })).rejects.toMatchObject({
+      code: 'session/cwd-forbidden',
+      details: { cwd: '/other-tenant' },
+    })
+    await ctx.fiber.dispose()
+  })
+
+  it('answers a Session outside the caller tenant scope as not visible', async () => {
+    const ctx = await baseContext()
+    ctx.provide('workspaceRegistry', { list: () => [] } as never)
+    const source = completedSession(ctx, 'tenant-source', '/other-tenant')
+    await ctx.agents.register({ id: source.id, session: source, status: 'idle', ctx } as Agent)
+    ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+    const controller = new SessionCommandController(ctx, controllerAgents(ctx), '/default')
+
+    await expect(controller.rename({ sessionId: source.id, title: 'hidden' }))
+      .rejects.toMatchObject({ code: 'session/not-visible', details: { sessionId: source.id } })
+    await expect(controller.fork({ sessionId: source.id }))
+      .rejects.toMatchObject({ code: 'session/not-visible' })
+    await ctx.fiber.dispose()
+  })
+})

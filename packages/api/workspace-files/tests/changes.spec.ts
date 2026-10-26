@@ -383,6 +383,21 @@ describe('workspaceFiles.changes — backends and access', () => {
     expect(watch).not.toHaveBeenCalled()
   })
 
+  it('rejects a workspace path the caller cannot see before opening a watcher', async () => {
+    const path = join(harness.workspace, 'inside.txt')
+    await writeFile(path, 'inside contents')
+    harness.ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    const stream = open(harness.endpoint(), path)
+    await expect(failureOf(stream.next())).resolves.toMatchObject({
+      code: 'workspace-file/outside-workspace', details: { path },
+    })
+    expect(watch).not.toHaveBeenCalled()
+  })
+
   it('allows an outside file under the same read authority', async () => {
     const path = join(harness.outside, 'allowed.txt')
     await writeFile(path, 'outside contents')

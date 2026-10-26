@@ -561,3 +561,38 @@ describe('Session attachment authorization', () => {
     await ctx.fiber.dispose()
   })
 })
+
+describe('Session command tenant scope', () => {
+  it('hides an attached Session from a caller outside its tenant scope', async () => {
+    const { ctx, controller, agent } = await commandHarness()
+    ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+
+    await expectFailure(controller.updateQueue({
+      sessionId: agent.id, itemId: MessageId('pending'), action: { kind: 'remove' },
+    }), 'session/not-visible')
+    await expectFailure(controller.attachment({
+      sessionId: agent.id, attachmentId: AttachmentId('att'),
+    }), 'session/not-visible')
+    await ctx.fiber.dispose()
+  })
+
+  it('hides a cold Session from a caller outside its tenant scope', async () => {
+    const readImage = vi.fn((image: ImageAttachmentRef) => Promise.resolve({ ref: image, data: Uint8Array.of(1) }))
+    const fixture = await persistedController([], readImage)
+    fixture.ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+
+    await expectFailure(fixture.controller.attachment({
+      sessionId: fixture.sessionId, attachmentId: AttachmentId('att'),
+    }), 'session/not-visible')
+    expect(readImage).not.toHaveBeenCalled()
+    await fixture.ctx.fiber.dispose()
+  })
+})

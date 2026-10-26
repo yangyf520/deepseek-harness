@@ -10,7 +10,10 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import type {} from '@deepseek-ai/dsh-jobs'
+import type {} from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { observeJobOutput } from './observe.ts'
 import { streamJobRows } from './rows.ts'
@@ -41,7 +44,7 @@ export interface Config {
 
 /** Host service backing the generated `ctx.remote.job` namespace. */
 export class JobController extends TypertRemoteService {
-  static inject = ['jobs', 'typert']
+  static inject = ['jobs', 'typert', 'sessions']
 
   static Config: z<Config> = z.object({
     observeFlushMs: z.natural().min(1).default(DEFAULT_OBSERVE_FLUSH_MS),
@@ -74,6 +77,7 @@ export class JobController extends TypertRemoteService {
    */
   @Remote({ mode: 'stream' })
   list(request: JobListRequest, signal: AbortSignal): AsyncIterable<JobListFrame> {
+    this.requireVisibleSession(request.sessionId)
     return streamJobRows(this.ctx.jobs, request, { flushMs: this.observeFlushMs }, signal)
   }
 
@@ -89,6 +93,7 @@ export class JobController extends TypertRemoteService {
    */
   @Remote({ mode: 'stream' })
   follow(request: JobFollowRequest, signal: AbortSignal): AsyncIterable<JobFollowFrame> {
+    this.requireVisibleSession(request.sessionId)
     return observeJobOutput(this.ctx.jobs, request, {
       flushMs: this.observeFlushMs,
       maxFrameBytes: this.observeMaxFrameBytes,
@@ -108,6 +113,7 @@ export class JobController extends TypertRemoteService {
    */
   @Remote('kill')
   kill(request: JobKillRequest): JobKillValue {
+    this.requireVisibleSession(request.sessionId)
     const jobs = this.ctx.jobs
     try {
       jobs.get(request.jobId, request.sessionId)
@@ -124,6 +130,25 @@ export class JobController extends TypertRemoteService {
     // contract (job state unchanged) instead of masquerading as job-not-found.
     const outcome = jobs.kill(request.jobId, request.sessionId, 'cancelled by the user')
     return { outcome }
+  }
+
+  /**
+   * Refuse a request naming a session outside the caller's tenant scope.
+   *
+   * An absent session passes: the request names an unowned job, and the
+   * registry's own owner fence still refuses an owned one. An unknown session
+   * fails, because without its cwd its owner cannot be confirmed.
+   * @param sessionId - session the request names, when it names one.
+   * @throws RemoteError 'job/session-forbidden' when the session is not the caller's.
+   */
+  private requireVisibleSession(sessionId: SessionId | undefined): void {
+    if (sessionId === undefined) return
+    if (new TenantGuard(this.ctx).sessionVisibleById(sessionId)) return
+    throw new RemoteError(
+      'job/session-forbidden',
+      `session "${sessionId}" is outside your tenant scope`,
+      { sessionId },
+    )
   }
 }
 

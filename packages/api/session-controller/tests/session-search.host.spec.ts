@@ -182,6 +182,38 @@ describe('session.search', () => {
     expect(exec.signal).toBe(signal)
   })
 
+  it('searches only the Sessions inside the caller tenant scope', async () => {
+    const ctx = await baseContext()
+    const mine = header('tenant-search-mine', '/tenant/a')
+    const foreign = header('tenant-search-foreign', '/tenant/b')
+    ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
+      list: () => Promise.resolve([mine, foreign]),
+    }) as never)
+    installSearchQuery(ctx, () => Promise.resolve({
+      items: [
+        { ...hit('tenant-search-mine'), header: mine },
+        { ...hit('tenant-search-foreign'), header: foreign },
+      ],
+    }))
+    ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: (cwd?: string) => cwd === '/tenant/a',
+      isSystemAdmin: () => false,
+    })
+
+    const response = await createSessionTestRemote(ctx, defaults)
+      .search(request('match'), new AbortController().signal)
+
+    expect(response).toEqual({
+      ok: true,
+      value: {
+        items: [{ sessionId: 'tenant-search-mine', snippet: 'match 0' }],
+        hasMore: false,
+      },
+    })
+    await ctx.fiber.dispose()
+  })
+
   it('rejects invalid wire queries before invoking the search provider', async () => {
     const ctx = await baseContext()
     ctx.sessions.create(sid('visible'), { meta: header('visible') })

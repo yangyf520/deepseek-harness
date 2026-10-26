@@ -157,17 +157,37 @@ export class SandboxPolicyService extends Service {
    * mode outranks the session's last `sandbox/mode` event, which outranks the
    * deployment default. A session cwd is its workspace-write boundary; the
    * configured root is the fallback for agentless calls and sessions without a
-   * cwd.
+   * cwd. A tenant that may not modify the session workspace forces read-only
+   * ahead of that order.
    * @param request - optional session and approved mode override.
    * @returns the fully resolved per-call mode and absolute workspace root.
    */
   resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
     const { session } = request
+    const reads = this.readRoots()
+    const cwd = session?.header.cwd
+    const gate = this.ctx.reflect.get('authTenant') as { writable?(path: string): boolean } | undefined
+    const writable = cwd === undefined || (gate?.writable?.(cwd) ?? true)
+    const requested = request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode
     return {
-      mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
-      workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
+      mode: writable ? requested : 'read-only',
+      workspaceRoot: resolveWorkspaceRoot(cwd ?? this.workspaceRoot),
       ...session === undefined ? {} : { sessionId: session.id },
+      ...reads === undefined ? {} : { readDeniedRoots: reads.deny, readAllowedRoots: reads.allow },
     }
+  }
+
+  /**
+   * Read the mounted tenant's subprocess read fence. Absent in single-user
+   * compositions and outside a tenant request, which leaves the policy's read
+   * fields unset and the backends unconfined for reads.
+   * @returns the deny and allow roots, or undefined when nothing is fenced.
+   */
+  private readRoots(): { allow: readonly string[]; deny: readonly string[] } | undefined {
+    const gate = this.ctx.reflect.get('authTenant') as
+      { readRoots(): { allow: readonly string[]; deny: readonly string[] } } | undefined
+    const roots = gate?.readRoots()
+    return roots === undefined || roots.deny.length === 0 ? undefined : roots
   }
 
   /**

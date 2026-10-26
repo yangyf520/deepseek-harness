@@ -242,6 +242,30 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     })
   })
 
+  it('bootstraps only the tenant root when OAuth is configured', async () => {
+    const inside = await makeDir(join('home', 'users', 'alice', 'workspace'))
+    const outside = await makeDir('outside')
+    const previousHome = process.env.DSH_HOME
+    const previousApp = process.env.OAUTH_APP_ID
+    process.env.DSH_HOME = join(base, 'home')
+    process.env.OAUTH_APP_ID = 'app'
+    try {
+      const result = await harness({
+        sessions: [
+          header('inside', inside, 100),
+          header('outside', outside, 200),
+        ],
+      })
+      expect(result.registry.list().map(workspace => workspace.path)).toEqual([inside])
+      expect(result.registry.list().map(workspace => workspace.sessionIds)).toEqual([['inside']])
+    } finally {
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+      if (previousApp === undefined) delete process.env.OAUTH_APP_ID
+      else process.env.OAUTH_APP_ID = previousApp
+    }
+  })
+
   it('breaks equal bootstrap timestamps by session id and canonical path', async () => {
     const first = await makeDir('tie-first')
     const second = await makeDir('tie-second')

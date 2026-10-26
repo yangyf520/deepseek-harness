@@ -48,6 +48,9 @@
       "path": "../../typert/protocol"
     },
     {
+      "path": "../remote-access/tsconfig.host.json"
+    },
+    {
       "path": "../../util/brand"
     },
     {

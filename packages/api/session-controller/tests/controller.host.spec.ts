@@ -241,3 +241,38 @@ describe('SessionController facade', () => {
     await expect(waiting).resolves.toMatchObject({ done: true })
   })
 })
+
+describe('SessionController tenant scope', () => {
+  it('hides an inspected Session from a caller outside its tenant scope', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    const sessionId = SessionId('tenant-hidden')
+    const header: SessionHeader = {
+      version: SESSION_FORMAT_VERSION,
+      id: sessionId,
+      createdAt: 1,
+      cwd: '/other-tenant',
+      isSeeded: false,
+    }
+    ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
+      list: () => Promise.resolve([header]),
+      inspect: () => Promise.resolve({
+        meta: header,
+        inheritedEventCount: SessionLogOffset(0),
+        events: [],
+      }),
+    }) as never)
+    const controller = createSessionTestController(ctx, defaults)
+    ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+
+    await expect(controller.inspect(sessionId)).rejects.toMatchObject({ code: 'session/not-visible' })
+    ctx.sessions.create(sessionId, { meta: header })
+    await expect(controller.inspect(sessionId)).rejects.toMatchObject({ code: 'session/not-visible' })
+    await ctx.fiber.dispose()
+  })
+})

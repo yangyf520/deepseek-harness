@@ -29,6 +29,7 @@ import type {
 
 export type * from './types.ts'
 export { REMOTE_ACCESS_SNAPSHOT_KEY } from './snapshot.ts'
+export { TenantGuard } from './tenant.ts'
 
 /** The opening frame of a snapshot generation. */
 export type RemoteAccessBaseline = Extract<RemoteAccessFrame, { type: 'baseline' }>

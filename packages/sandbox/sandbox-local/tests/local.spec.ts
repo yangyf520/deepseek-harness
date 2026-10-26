@@ -490,3 +490,38 @@ describe('the windows-acl probe (runner invocation contract)', () => {
     expect(confined.argv.slice(0, 2)).toEqual([process.execPath, builtEntry])
   })
 })
+
+describe('read fence', () => {
+  const fenced: SandboxPolicy = {
+    mode: 'read-only',
+    workspaceRoot: '/ws',
+    readDeniedRoots: ['/home/deploy/.dsh'],
+    readAllowedRoots: ['/home/deploy/.dsh/users/alice', '/home/deploy/.dsh/shared/legal'],
+  }
+
+  it('seatbelt denies the wider root before granting the narrower ones', () => {
+    const profile = seatbeltProfileArgs(fenced)[1] as string
+    const deny = '(deny file-read* (subpath "/home/deploy/.dsh"))'
+    expect(profile).toContain(deny)
+    expect(profile).toContain(
+      '(allow file-read* (subpath "/home/deploy/.dsh/users/alice") (subpath "/home/deploy/.dsh/shared/legal"))',
+    )
+    // SBPL resolves by last match, so the grant must follow the denial.
+    expect(profile.indexOf(deny)).toBeLessThan(profile.indexOf('(allow file-read*'))
+  })
+
+  it('bwrap hides the denied root and binds the grants back', () => {
+    const args = bwrapProfileArgs(fenced)
+    expect(args).toEqual(expect.arrayContaining(['--tmpfs', '/home/deploy/.dsh']))
+    expect(args).toEqual(expect.arrayContaining(['--dir', '/home/deploy/.dsh/users']))
+    expect(args).toEqual(expect.arrayContaining(['--dir', '/home/deploy/.dsh/shared']))
+    expect(args).toEqual(expect.arrayContaining([
+      '--ro-bind', '/home/deploy/.dsh/users/alice', '/home/deploy/.dsh/users/alice',
+    ]))
+  })
+
+  it('leaves every profile unfenced when the policy carries no denial', () => {
+    expect(seatbeltProfileArgs(RO)[1]).not.toContain('file-read')
+    expect(bwrapProfileArgs(RO)).not.toContain('--tmpfs')
+  })
+})

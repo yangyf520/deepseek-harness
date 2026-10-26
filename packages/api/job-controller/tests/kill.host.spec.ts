@@ -67,6 +67,19 @@ function failureCode(run: () => unknown): string {
 }
 
 describe('JobController.kill', () => {
+  it('refuses a session outside the caller tenant scope', async () => {
+    const { ctx, session, controller } = await harness()
+    ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+    const task = producer()
+    const id = ctx.jobs.start(task.spec)
+    expect(failureCode(() => controller.kill({ sessionId: session.id, jobId: id })))
+      .toBe('job/session-forbidden')
+  })
+
   it('kills an owned running job without claiming the terminal report', async () => {
     const { ctx, session, agent, controller } = await harness()
     const task = producer('pnpm run watch')
@@ -146,4 +159,25 @@ describe('JobController.kill', () => {
     expect(task.cancels).toEqual(['cancelled by the user'])
     expect(ctx.jobs.get(id, childAgent.id).status).toBe('stopping')
   })
+})
+
+describe('JobController tenant scope', () => {
+  it.each(['list', 'follow'] as const)(
+    'refuses %s for a Session outside the caller tenant scope',
+    async (method) => {
+      const { ctx, session, controller } = await harness()
+      ctx.provide('authTenant', {
+        visible: () => true,
+        sessionVisible: () => false,
+        isSystemAdmin: () => false,
+      })
+      const id = ctx.jobs.start(producer().spec)
+      const signal = new AbortController().signal
+      const call = method === 'list'
+        ? () => controller.list({ sessionId: session.id }, signal)
+        : () => controller.follow({ sessionId: session.id, jobId: id }, signal)
+
+      expect(failureCode(call)).toBe('job/session-forbidden')
+    },
+  )
 })

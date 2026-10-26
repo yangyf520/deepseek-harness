@@ -266,6 +266,28 @@ describe('workspaceFiles.read — the file changing under its gate', () => {
     expect(failure.details).toMatchObject({ kind: 'directory' })
   })
 
+  it('refuses a path inside the workspace that the caller cannot see', async () => {
+    await writeFile(join(workspace, 'hidden.txt'), 'secret', 'utf8')
+    harness.ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    await expect(failureOf(endpoint().read(harness.scope, 'hidden.txt', {}, signal())))
+      .resolves.toMatchObject({ code: 'workspace-file/outside-workspace', details: { path: 'hidden.txt' } })
+  })
+
+  it('refuses stat on a path the caller cannot see', async () => {
+    await writeFile(join(workspace, 'hidden-stat.txt'), 'x', 'utf8')
+    harness.ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    await expect(failureOf(endpoint().stat(harness.scope, 'hidden-stat.txt', signal())))
+      .resolves.toMatchObject({ code: 'workspace-file/outside-workspace', details: { path: 'hidden-stat.txt' } })
+  })
+
   it('passes any other backend failure through unchanged', async () => {
     await writeFile(join(workspace, 'notes.txt'), 'x', 'utf8')
     vi.spyOn(harness.ctx.fs, 'streamText').mockRejectedValue(new FsError('disk unreadable', 'FS_IO_ERROR'))

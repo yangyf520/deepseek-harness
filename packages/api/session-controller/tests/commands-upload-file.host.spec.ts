@@ -466,6 +466,28 @@ describe('Session file uploads', () => {
     ])
   })
 
+  it('admits one message when concurrent prompts share a request id', async () => {
+    const { controller, followup } = await uploadHarness()
+    const request = promptRequest([{ type: 'text', text: 'hi' }])
+    await Promise.all([
+      controller.prompt(request, USER_SOURCE),
+      controller.prompt(request, USER_SOURCE),
+    ])
+    expect(followup).toHaveBeenCalledTimes(1)
+  })
+
+  it('delivers concurrent prompts that carry different request ids', async () => {
+    const { controller, followup } = await uploadHarness()
+    const first = promptRequest([{ type: 'text', text: 'one' }])
+    const second = { ...promptRequest([{ type: 'text', text: 'two' }]), requestId: 'req-2' as SessionRequestId }
+    const secondSource: MessageSource = { kind: 'user', rpcId: 'req-2' as SessionRequestId }
+    await Promise.all([
+      controller.prompt(first, USER_SOURCE),
+      controller.prompt(second, secondSource),
+    ])
+    expect(followup).toHaveBeenCalledTimes(2)
+  })
+
   it('maps a non-canonical payload to the wire attachment error', async () => {
     const { uploads, agent, saveFile } = await uploadHarness()
     await expect(uploads.upload(agent, { data: 'not base64!!' }, new AbortController().signal))
@@ -481,5 +503,43 @@ describe('Session file uploads', () => {
         code: 'gateway/internal',
         message: 'failed to store file upload: Error: disk unavailable',
       })
+  })
+
+  it('refuses a verbatim upload for a Session outside the caller tenant scope', async () => {
+    const { ctx, uploads, agent, saveFile } = await uploadHarness()
+    ctx.provide('authTenant', { sessionVisible: () => false })
+    await expect(uploads.upload(agent, { data: 'AAAA' }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'session/not-visible', details: { sessionId: SESSION } })
+    expect(saveFile).not.toHaveBeenCalled()
+  })
+
+  it('stages an upload when the receiving Session is inside the caller tenant scope', async () => {
+    const { ctx, uploads, agent } = await uploadHarness()
+    ctx.provide('authTenant', { sessionVisible: () => true })
+    await expect(uploads.upload(agent, { data: 'AAAA' }, new AbortController().signal))
+      .resolves.toMatchObject({ file: { bytes: 3 } })
+  })
+
+  it('refuses a streamed upload for a Session outside the caller tenant scope', async () => {
+    const { ctx, uploads, saveFileStream } = await uploadHarness()
+    ctx.provide('authTenant', { sessionVisible: () => false })
+    await expect(uploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(1) })(),
+    })).rejects.toMatchObject({ code: 'session/not-visible', details: { sessionId: SESSION } })
+    expect(saveFileStream).not.toHaveBeenCalled()
+  })
+})
+
+describe('Session command tenant scope', () => {
+  it('refuses a prompt for a Session outside the caller tenant scope', async () => {
+    const { ctx, controller } = await uploadHarness()
+    ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+    await expect(controller.prompt(promptRequest([{ type: 'text', text: 'hi' }]), USER_SOURCE))
+      .rejects.toMatchObject({ code: 'session/not-visible', details: { sessionId: SESSION } })
   })
 })

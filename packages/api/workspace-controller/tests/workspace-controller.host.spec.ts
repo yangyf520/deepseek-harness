@@ -7,7 +7,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { RemoteError, type PeerId, type Principal, type RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
-import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
+import WorkspaceRegistry, { WorkspaceOrderInvalidError } from '@deepseek-ai/dsh-workspace'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import RemoteAccessService, { type RemoteAccessCondition, type RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
 import WorkspaceController from '../src/index.ts'
@@ -62,7 +62,8 @@ async function harness(options: { systemDocuments?: boolean } = {}) {
   const storageDomain = new DomainFacility(ctx, { backend: 'memory', routes: {} })
   ctx.storage.mount('domain', storageDomain)
   ctx.provide('storageDomain', storageDomain)
-  ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
+  const persistence = { list: () => Promise.resolve([]), stat: () => Promise.resolve(undefined) }
+  ctx.provide('sessionPersistence', persistence as never)
   await ctx.plugin(WorkspaceRegistry)
   const dispose = (): void => {}
   ctx.provide('typert', {
@@ -72,7 +73,7 @@ async function harness(options: { systemDocuments?: boolean } = {}) {
   } as never)
   new RemoteAccessService(ctx)
   const controller = new WorkspaceController(ctx, options.systemDocuments === true ? {} : { documentsDirectory: root })
-  return { controller, ctx, root, storageDomain }
+  return { controller, ctx, root, storageDomain, persistence }
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -115,7 +116,112 @@ async function nextFrame(
   return next.value
 }
 
+describe('WorkspaceController tenant isolation', () => {
+  it('refuses to register a directory outside the caller roots', async () => {
+    const { controller, ctx, root } = await harness()
+    const inside = stageDir(root, 'inside')
+    const outside = stageDir(root, 'outside')
+    ctx.provide('authTenant', {
+      visible: (path: string) => path === inside,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    await expect(controller.create({ path: outside })).rejects.toMatchObject({
+      code: 'workspace/invalid-path',
+      details: { path: outside },
+    })
+    await expect(controller.create({ path: inside })).resolves.toMatchObject({ created: true })
+  })
+
+  it('answers a hidden Workspace as unknown without revealing its path', async () => {
+    const { controller, ctx, root } = await harness()
+    const shownPath = stageDir(root, 'shown')
+    const shown = await controller.create({ path: shownPath })
+    const hidden = await controller.create({ path: stageDir(root, 'hidden') })
+    ctx.provide('authTenant', {
+      visible: (path: string) => path === shownPath,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    await expect(controller.rename({ workspaceId: hidden.workspace.workspaceId, title: 'renamed' }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+    await expect(controller.delete({ workspaceId: hidden.workspace.workspaceId }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+    // A command without an anchor moves the visible Workspace alone.
+    const order = await controller.insertBefore({ workspaceId: shown.workspace.workspaceId })
+    expect(order.workspaceIds).toContain(shown.workspace.workspaceId)
+  })
+
+  it('answers a hidden ordering anchor as unknown', async () => {
+    const { controller, ctx, root } = await harness()
+    const shownPath = stageDir(root, 'anchor-shown')
+    const shown = await controller.create({ path: shownPath })
+    const hidden = await controller.create({ path: stageDir(root, 'anchor-hidden') })
+    ctx.provide('authTenant', {
+      visible: (path: string) => path === shownPath,
+      sessionVisible: () => true,
+      isSystemAdmin: false,
+    })
+    await expect(controller.insertBefore({
+      workspaceId: shown.workspace.workspaceId,
+      beforeWorkspaceId: hidden.workspace.workspaceId,
+    })).rejects.toMatchObject({ code: 'workspace/not-found' })
+  })
+
+  it('reports a Workspace that vanished between resolution and deletion', async () => {
+    const { controller, ctx, root } = await harness()
+    const created = await controller.create({ path: stageDir(root, 'vanishing') })
+    vi.spyOn(ctx.workspaceRegistry, 'delete').mockResolvedValueOnce(false)
+    await expect(controller.delete({ workspaceId: created.workspace.workspaceId }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+  })
+
+  it('answers a Session outside the caller scope as unknown', async () => {
+    const { controller, ctx } = await harness()
+    ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: () => false,
+      isSystemAdmin: () => false,
+    })
+    const sessionId = 'hidden-session' as SessionId
+    await expect(controller.archiveSession({ sessionId })).rejects.toMatchObject({ code: 'session/not-found' })
+    await expect(controller.unarchiveSession({ sessionId })).rejects.toMatchObject({ code: 'session/not-found' })
+    await expect(controller.pinSession({ sessionId })).rejects.toMatchObject({ code: 'session/not-found' })
+    await expect(controller.unpinSession({ sessionId })).rejects.toMatchObject({ code: 'session/not-found' })
+  })
+
+  it('answers an offline Session from its stored header', async () => {
+    const { controller, ctx, root, persistence } = await harness()
+    const inside = stageDir(root, 'stored')
+    const outside = stageDir(root, 'stored-outside')
+    const archive = vi.spyOn(ctx.workspaceRegistry, 'archiveSession').mockResolvedValue()
+    const stat = vi.spyOn(persistence, 'stat')
+    ctx.provide('authTenant', {
+      visible: () => true,
+      sessionVisible: (cwd?: string) => cwd === inside,
+      isSystemAdmin: () => false,
+    })
+    const sessionId = SessionId('stored-session')
+    stat.mockResolvedValueOnce({ header: { cwd: inside } } as never)
+    await expect(controller.archiveSession({ sessionId })).resolves.toEqual({ archivedSessionIds: [] })
+    expect(archive).toHaveBeenCalledWith(sessionId, {})
+
+    stat.mockResolvedValueOnce({ header: { cwd: outside } } as never)
+    await expect(controller.archiveSession({ sessionId: SessionId('stored-outside') }))
+      .rejects.toMatchObject({ code: 'session/not-found' })
+    expect(archive).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('WorkspaceController commands', () => {
+  it('maps a registry order failure to an unknown Workspace', async () => {
+    const { controller, ctx, root } = await harness()
+    const created = await controller.create({ path: stageDir(root, 'order') })
+    vi.spyOn(ctx.workspaceRegistry, 'insertBefore')
+      .mockRejectedValueOnce(new WorkspaceOrderInvalidError(created.workspace.workspaceId))
+    await expect(controller.insertBefore({ workspaceId: created.workspace.workspaceId }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+  })
   it('serializes concurrent path adoption and preserves an existing title', async () => {
     const { controller, root } = await harness()
     const path = stageDir(root, 'alpha')
@@ -332,6 +438,60 @@ describe('WorkspaceController commands', () => {
 })
 
 describe('WorkspaceController follow', () => {
+  it('keeps an increment out of the stream when the Workspace leaves the caller scope', async () => {
+    const { ctx, root } = await harness()
+    const workspace = await ctx.workspaceRegistry.create(stageDir(root, 'filtered'))
+    ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    const feed = new WorkspaceFeed(ctx)
+    const abort = new AbortController()
+    const iterator = feed.follow(abort.signal)[Symbol.asyncIterator]()
+    try {
+      await expect(nextFrame(iterator)).resolves.toMatchObject({ type: 'baseline', value: { items: [] } })
+      await workspace.setTitle('renamed')
+      const pending = iterator.next()
+      const raced = await Promise.race([
+        pending.then(() => 'frame' as const),
+        new Promise<'idle'>((resolve) => { setTimeout(() => { resolve('idle') }, 20) }),
+      ])
+      expect(raced).toBe('idle')
+      void pending
+    } finally {
+      abort.abort()
+      await iterator.return?.()
+    }
+  })
+
+  it('keeps a newly accounted Workspace out of the stream', async () => {
+    const { ctx, root } = await harness()
+    ctx.provide('authTenant', {
+      visible: () => false,
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+    })
+    const feed = new WorkspaceFeed(ctx)
+    const abort = new AbortController()
+    const iterator = feed.follow(abort.signal)[Symbol.asyncIterator]()
+    try {
+      await expect(nextFrame(iterator)).resolves.toMatchObject({ type: 'baseline', value: { items: [] } })
+      await ctx.workspaceRegistry.create(stageDir(root, 'newcomer'))
+      // Only the empty order reaches the caller; the newcomer's upsert does not.
+      await expect(nextFrame(iterator)).resolves.toEqual({ type: 'order', workspaceIds: [] })
+      const pending = iterator.next()
+      const raced = await Promise.race([
+        pending.then(() => 'frame' as const),
+        new Promise<'idle'>((resolve) => { setTimeout(() => { resolve('idle') }, 20) }),
+      ])
+      expect(raced).toBe('idle')
+      void pending
+    } finally {
+      abort.abort()
+      await iterator.return?.()
+    }
+  })
   it('seeds a new feed from existing rows and rejects an inconsistent registry commit', async () => {
     const { ctx, root } = await harness()
     const existing = await ctx.workspaceRegistry.create(stageDir(root, 'existing'))

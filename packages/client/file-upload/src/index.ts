@@ -14,6 +14,12 @@ import type { EncodedFileUploadRequest, FileUploadReceiptId, FileUploadValue } f
 
 export type * from './types.ts'
 
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    'session/not-visible': { readonly sessionId: SessionId }
+  }
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host storage and staged-receipt service for browser file uploads. */
@@ -176,7 +182,24 @@ export class FileUploads extends TypertRemoteService {
     this.retire(agent.session, requestId)
   }
 
+  /**
+   * Refuse an upload whose receiving Session lies outside the caller's tenant.
+   * @param session - Session that would own the stored file.
+   */
+  private assertSessionVisible(session: Session): void {
+    const scope = this.ctx.reflect.get('authTenant') as {
+      sessionVisible(cwd: string | undefined): boolean
+    } | undefined
+    if (scope === undefined || scope.sessionVisible(session.header.cwd)) return
+    throw new RemoteError(
+      'session/not-visible',
+      `session "${session.id}" is outside your tenant scope`,
+      { sessionId: session.id },
+    )
+  }
+
   private async commit(agent: Agent, save: () => Promise<FileAttachmentRef>): Promise<FileUploadValue> {
+    this.assertSessionVisible(agent.session)
     this.assertOrdinaryAgent(agent)
     let file: FileAttachmentRef
     try {

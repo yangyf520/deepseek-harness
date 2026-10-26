@@ -37,6 +37,9 @@ function fixture(overrides: Partial<Config> = {}) {
     ensure: vi.fn<(agent: Agent, signal?: AbortSignal) => Promise<string>>(async agent => agent.session.header.cwd ?? '/workspace'),
   }
   ctx.provide('sandboxPolicy', sandboxPolicy as never)
+  // Tenant visibility resolves a Session through this service; without a tenant
+  // service mounted every decision allows.
+  ctx.provide('sessions', { get: () => undefined })
   ctx.provide('workingDirectory', workingDirectory as never)
   const output = new PassThrough()
   const done = Promise.withResolvers<{ exitCode: number; signal: null }>()
@@ -654,6 +657,14 @@ it('retains a known terminal without Agent resolution and fences stream admissio
   expect(await ended).toMatchObject({ done: true })
   expect(() => h.controller.retain(h.agent.id, id, signal())).toThrow('unavailable')
   await expect(h.controller.create(h.agent, request, signal())).rejects.toThrow('closed in this Session')
+})
+
+it('hides retained terminals from a caller outside the owning Session tenant scope', async () => {
+  const h = fixture()
+  await h.controller.create(h.agent, request, signal())
+  h.ctx.provide('authTenant', { sessionVisible: () => false })
+  expect(h.controller.list(h.agent.id)).toEqual([])
+  expect(() => h.controller.retain(h.agent.id, id, signal())).toThrow('unavailable')
 })
 
 it('reclaims confirmed idle processes and preserves closed identity exclusion after removing their screens', async () => {

@@ -23,6 +23,7 @@ import {
   type ApiSessionAgentResult,
 } from './agent.ts'
 import { SessionCommandController, hasPromptContent } from './commands.ts'
+import { isSessionVisibleToTenant, sessionNotVisible } from './tenant-visibility.ts'
 import { SessionControlController } from './control.ts'
 import { SessionHistoryController } from './history.ts'
 import { SessionFileReferences } from './file-references.ts'
@@ -256,6 +257,9 @@ export class SessionController extends TypertRemoteService {
   ): Promise<SessionInspection> {
     const attached = this.ctx.sessions.get(sessionId)
     if (attached !== undefined) {
+      if (!isSessionVisibleToTenant(this.ctx, attached.header.cwd)) {
+        return Promise.reject(sessionNotVisible(sessionId))
+      }
       return Promise.resolve({
         meta: attached.header,
         inheritedEventCount: attached.inheritedEventCount,
@@ -263,7 +267,12 @@ export class SessionController extends TypertRemoteService {
         events: attached.snapshotEvents(),
       })
     }
-    return inspectApiSession(this.ctx, sessionId, signal)
+    return inspectApiSession(this.ctx, sessionId, signal).then((result) => {
+      if (!isSessionVisibleToTenant(this.ctx, result.meta.cwd)) {
+        throw sessionNotVisible(sessionId)
+      }
+      return result
+    })
   }
 
   /**

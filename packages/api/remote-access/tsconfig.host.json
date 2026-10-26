@@ -8,10 +8,12 @@
   "files": [
     "src/index.ts",
     "src/snapshot.ts",
+    "src/tenant.ts",
     "src/types.ts"
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../core/session" },
     { "path": "../../host/webserver" },
     { "path": "../../typert/protocol" }
   ]

@@ -1,6 +1,10 @@
 /** Workspace command implementation and stable Remote failure mapping. */
 
+import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import {
   WorkspaceActiveSessionError,
@@ -41,9 +45,19 @@ export class WorkspaceCommands {
    * Create or resolve one Workspace over an existing directory.
    * @param request - directory path to register.
    * @returns the Workspace and whether this call created it.
+   * @throws RemoteError 'workspace/invalid-path' when the directory lies
+   *   outside the caller's tenant scope.
    */
   create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
+    const path = resolve(request.path)
     return this.enqueue(async () => {
+      if (!new TenantGuard(this.ctx).visible(path)) {
+        throw new RemoteError(
+          'workspace/invalid-path',
+          `cannot create a Workspace at "${request.path}": outside your tenant scope`,
+          { path: request.path },
+        )
+      }
       try {
         const existing = await this.ctx.workspaceRegistry.resolveByPath(request.path)
         if (existing !== undefined) {
@@ -97,6 +111,7 @@ export class WorkspaceCommands {
    */
   delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
     return this.enqueue(async () => {
+      this.requireWorkspace(WorkspaceId(request.workspaceId))
       if (!await this.ctx.workspaceRegistry.delete(WorkspaceId(request.workspaceId))) {
         throw workspaceNotFound(request.workspaceId)
       }
@@ -110,6 +125,8 @@ export class WorkspaceCommands {
    * @returns the complete resulting Workspace order.
    */
   async insertBefore(request: WorkspaceInsertBeforeRequest): Promise<WorkspaceOrderValue> {
+    this.requireWorkspace(WorkspaceId(request.workspaceId))
+    if (request.beforeWorkspaceId !== undefined) this.requireWorkspace(WorkspaceId(request.beforeWorkspaceId))
     try {
       const workspaceIds = await this.ctx.workspaceRegistry.insertBefore(
         WorkspaceId(request.workspaceId),
@@ -160,6 +177,7 @@ export class WorkspaceCommands {
    * @returns the complete resulting archive set.
    */
   async archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
+    await this.requireSession(request.sessionId)
     try {
       await this.ctx.workspaceRegistry.archiveSession(
         request.sessionId,
@@ -190,6 +208,7 @@ export class WorkspaceCommands {
    * @returns the complete resulting archive set.
    */
   async unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
+    await this.requireSession(request.sessionId)
     await this.ctx.workspaceRegistry.unarchiveSession(request.sessionId)
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
   }
@@ -200,6 +219,7 @@ export class WorkspaceCommands {
    * @returns the complete resulting pin set, most recently pinned first.
    */
   async pinSession(request: WorkspacePinSessionRequest): Promise<WorkspacePinValue> {
+    await this.requireSession(request.sessionId)
     try {
       await this.ctx.workspaceRegistry.pinSession(request.sessionId)
     } catch (error) {
@@ -222,6 +242,7 @@ export class WorkspaceCommands {
    * @returns the complete resulting pin set, most recently pinned first.
    */
   async unpinSession(request: WorkspaceUnpinSessionRequest): Promise<WorkspacePinValue> {
+    await this.requireSession(request.sessionId)
     await this.ctx.workspaceRegistry.unpinSession(request.sessionId)
     return { pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds] }
   }
@@ -229,7 +250,24 @@ export class WorkspaceCommands {
   private requireWorkspace(workspaceId: WorkspaceId): Workspace {
     const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(workspaceId))
     if (workspace === undefined) throw workspaceNotFound(workspaceId)
+    // A Workspace outside the caller's roots answers like an unknown one, so a
+    // refusal reveals neither its existence nor its path.
+    if (!new TenantGuard(this.ctx).visible(workspace.path)) throw workspaceNotFound(workspaceId)
     return workspace
+  }
+
+  /**
+   * Refuse a Session outside the caller's tenant scope as an unknown one.
+   * A Session that is not live answers from its stored header, so an offline
+   * Session is not refused for being absent from the live store.
+   * @param sessionId - Session identity the request names.
+   * @throws RemoteError 'session/not-found' when the Session is not visible.
+   */
+  private async requireSession(sessionId: SessionId): Promise<void> {
+    const cwd = this.ctx.sessions.get(sessionId)?.header.cwd
+      ?? (await this.ctx.get('sessionPersistence')?.stat(sessionId))?.header.cwd
+    if (new TenantGuard(this.ctx).sessionVisible(cwd)) return
+    throw new RemoteError('session/not-found', `Session "${sessionId}" not found`, { sessionId })
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {

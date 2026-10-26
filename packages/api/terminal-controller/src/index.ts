@@ -5,6 +5,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-working-directory'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import { Remote, RemoteError, TypertRemoteService, type RemoteStream } from '@deepseek-ai/dsh-typert-protocol'
 import { discoverShells, resolveShell } from './shells.ts'
 import { BrowserTerminal } from './terminal.ts'
@@ -74,7 +75,7 @@ interface OwnedSession {
 
 /** Typed Remote control of transient Session-owned terminal processes. */
 export class TerminalController extends TypertRemoteService {
-  static inject = ['subprocess', 'sandboxPolicy', 'workingDirectory', 'typert']
+  static inject = ['subprocess', 'sandboxPolicy', 'workingDirectory', 'typert', 'sessions']
   static Config: z<Config> = z.object({
     shell: z.union([z.object({
       path: z.string().required(), name: z.string().required(), args: z.array(z.string()).default([]),
@@ -139,12 +140,13 @@ export class TerminalController extends TypertRemoteService {
   /**
    * List retained terminals without resolving or activating an Agent.
    * @param sessionId - displayed Session identity, including offline history.
-   * @returns terminals retained for this Host lifetime.
+   * @returns terminals retained for this Host lifetime; empty when the Session
+   *   lies outside the caller's tenant scope.
    */
   @Remote
   list(sessionId: SessionId): WebTerminalInfo[] {
     const owner = this.owners.get(sessionId)
-    if (owner === undefined) return []
+    if (owner === undefined || !this.visible(sessionId)) return []
     return [...owner.terminals.values(), ...owner.allocations.values()].map(terminal => terminal.info)
   }
 
@@ -194,12 +196,15 @@ export class TerminalController extends TypertRemoteService {
    * @param id - retained Host terminal identity.
    * @param signal - physical Remote stream cancellation.
    * @returns a hold acknowledgement followed by an open lifetime stream.
+   * @throws RemoteError 'terminal/unavailable' when the terminal is closing or
+   *   unavailable, including where its Session lies outside the caller's tenant scope.
    */
   @Remote({ mode: 'stream' })
   retain(sessionId: SessionId, id: WebTerminalId, signal: AbortSignal): AsyncIterable<TerminalRetentionFrame> {
     const owner = this.owners.get(sessionId)
     const terminal = owner?.terminals.get(id)
-    if (terminal === undefined || owner?.closedIds.has(id) === true || owner?.lifetime.signal.aborted === true) {
+    if (terminal === undefined || owner?.closedIds.has(id) === true || owner?.lifetime.signal.aborted === true
+      || !this.visible(sessionId)) {
       throw new RemoteError('terminal/unavailable', 'Terminal is closing or unavailable', {})
     }
     return terminal.retain(signal)
@@ -293,6 +298,11 @@ export class TerminalController extends TypertRemoteService {
 
   private requireOpen(owner: OwnedSession, id: WebTerminalId): void {
     if (owner.closedIds.has(id)) throw new RemoteError('terminal/unavailable', 'Terminal was closed in this Session', {})
+  }
+
+  /** Whether the caller may observe terminals owned by `sessionId`. */
+  private visible(sessionId: SessionId): boolean {
+    return new TenantGuard(this.ctx).sessionVisibleById(sessionId)
   }
 
   private dimensions(cols: number, rows: number): void {

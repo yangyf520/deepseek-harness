@@ -6,6 +6,7 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { CredentialInfo } from '@deepseek-ai/dsh-credentials/types'
@@ -85,7 +86,7 @@ export class CredentialsController extends TypertRemoteService {
     const branded = request.refs.map(ref => [ref, credentialRef(ref)] as const)
     const credentials = this.provider()
     const entries = await Promise.all(branded.map(async ([ref, key]) =>
-      [ref, projectCredentialInfo(await credentials.describe(key))] as const))
+      [ref, this.view(await credentials.describe(key))] as const))
     return Object.fromEntries(entries)
   }
 
@@ -94,11 +95,13 @@ export class CredentialsController extends TypertRemoteService {
    * this direction only: no read path returns it.
    * @param ref - reference name to store under.
    * @param value - the non-empty secret value.
-   * @throws RemoteError when the request is invalid, no provider is mounted, or the provider refuses the write.
+   * @throws RemoteError when the request is invalid, the caller may not change
+   *   shared credentials, no provider is mounted, or the provider refuses the write.
    */
   @Remote
   async set(ref: string, value: string): Promise<void> {
     const request = parseRequest('credentials.set', setRequestSchema, { ref, value })
+    this.requireManage(request.ref)
     const branded = credentialRef(request.ref)
     const credentials = this.provider()
     await this.write(request.ref, () => credentials.set(branded, request.value))
@@ -107,14 +110,52 @@ export class CredentialsController extends TypertRemoteService {
   /**
    * Remove one reference from a configuration surface.
    * @param ref - reference name to remove.
-   * @throws RemoteError when the request is invalid, no provider is mounted, or the provider refuses the write.
+   * @throws RemoteError when the request is invalid, the caller may not change
+   *   shared credentials, no provider is mounted, or the provider refuses the write.
    */
   @Remote
   async unset(ref: string): Promise<void> {
     const request = parseRequest('credentials.unset', unsetRequestSchema, { ref })
+    this.requireManage(request.ref)
     const branded = credentialRef(request.ref)
     const credentials = this.provider()
     await this.write(request.ref, () => credentials.unset(branded))
+  }
+
+  /**
+   * Project one provider answer for this caller. A tenant member sees a
+   * read-only view: the document is deployment-wide, so the control that would
+   * let them change it must not appear writable.
+   * @param info - the provider's answer for one reference.
+   * @returns the wire view, with `writable` cleared for members.
+   */
+  private view(info: CredentialInfo): CredentialInfo {
+    const projected = projectCredentialInfo(info)
+    return this.canManage() ? projected : { ...projected, writable: false }
+  }
+
+  /**
+   * Whether the current request may change the shared credentials document.
+   * @returns true for a system administrator and outside a tenant request, where
+   *   the operator is the only user.
+   */
+  private canManage(): boolean {
+    return new TenantGuard(this.ctx).isSystemAdmin()
+  }
+
+  /**
+   * Reject a write the caller may not perform. Every tenant reads the same
+   * document, so a member's change would alter how everyone else authenticates.
+   * @param ref - the reference being written, named in the refusal and never its value.
+   * @throws RemoteError 'credential/forbidden' when the caller is a tenant member.
+   */
+  private requireManage(ref: string): void {
+    if (this.canManage()) return
+    throw new RemoteError(
+      'credential/forbidden',
+      'shared credentials can only be changed by a system administrator',
+      { ref },
+    )
   }
 
   /** Resolve the optional provider or report how to supply it. */

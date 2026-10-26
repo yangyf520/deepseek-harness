@@ -1,6 +1,7 @@
 /** Reconnect-safe Workspace baseline and increment producer. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import { Deque } from '@deepseek-ai/dsh-deque'
 import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
@@ -73,8 +74,11 @@ export class WorkspaceFeed {
    * @returns all active Workspaces plus archived and pinned Session identities.
    */
   baseline(): WorkspaceBaseline {
+    const guard = new TenantGuard(this.ctx)
     return {
-      items: this.ctx.workspaceRegistry.list().map(workspaceView),
+      items: this.ctx.workspaceRegistry.list()
+        .map(workspaceView)
+        .filter(view => guard.visible(view.path)),
       archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
       pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds],
     }
@@ -100,22 +104,29 @@ export class WorkspaceFeed {
 
   private changed(change: DomainChanged): void {
     if (change.domain !== 'workspace') return
+    const guard = new TenantGuard(this.ctx)
     if (change.table === '') {
       if (change.operation !== 'put') return
       const state = workspaceDomainState.parse(change.value)
       const nextOrder = state.workspaceIds.map(String)
       const orderChanged = !sameStrings(this.order, nextOrder)
+      const visibleIds: WorkspaceId[] = []
       for (const id of state.workspaceIds) {
-        if (this.knownIds.has(id)) continue
         const workspace = this.ctx.workspaceRegistry.get(id)
         if (workspace === undefined) {
           throw new Error(`committed Workspace registry references missing Workspace "${id}"`)
         }
+        const view = workspaceView(workspace)
+        // A Workspace outside the caller's scope reaches neither the order nor
+        // an upsert in this commit's frames.
+        if (!guard.visible(view.path)) continue
+        visibleIds.push(workspace.id)
+        if (this.knownIds.has(id)) continue
         this.knownIds.add(id)
-        this.publish({ type: 'upsert', workspace: workspaceView(workspace) })
+        this.publish({ type: 'upsert', workspace: view })
       }
       this.order = nextOrder
-      if (orderChanged) this.publish({ type: 'order', workspaceIds: [...state.workspaceIds] })
+      if (orderChanged) this.publish({ type: 'order', workspaceIds: visibleIds })
       const nextArchived = state.archivedSessionIds.map(String)
       if (!sameStrings(this.archived, nextArchived)) {
         this.archived = nextArchived
@@ -135,9 +146,11 @@ export class WorkspaceFeed {
       return
     }
     if (!this.knownIds.has(change.key)) return
+    const view = changedWorkspaceView(change.key, change.value)
+    if (!guard.visible(view.path)) return
     this.publish({
       type: 'upsert',
-      workspace: changedWorkspaceView(change.key, change.value),
+      workspace: view,
     })
   }
 

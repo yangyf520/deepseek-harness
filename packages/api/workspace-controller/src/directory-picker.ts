@@ -5,6 +5,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import type {
   DirectoryPickerCapabilities, DirectoryPickerErrorCode,
@@ -23,6 +24,12 @@ const createDirectoryRequestSchema = z.object({
     && !/[/\\]/.test(request.name),
   { message: 'host.createDirectory requires a single non-blank path segment name' },
 )
+
+/** The `authTenant` member this controller reads beyond visibility. */
+interface PickerTenant {
+  /** The current request's workspace-picking root; absent outside a tenant request. */
+  pickerRoot(): string | undefined
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -62,8 +69,10 @@ export class DirectoryPickerController extends TypertRemoteService {
   }
 
   /**
-   * List one directory level for a Remote caller's in-app browser.
-   * @param path - absolute directory to list; absent lists the home directory.
+   * List one directory level for a Remote caller's in-app browser. A caller
+   * inside a tenant request browses only that tenant's visible roots, and an
+   * absent path starts at the tenant root rather than the process home.
+   * @param path - absolute directory to list; absent lists the tenant's root.
    * @param signal - caller lifetime; abort stops the backend's scan instead of
    *   letting it outlive a disconnected caller.
    * @returns the level's listing with its ancestry.
@@ -71,8 +80,16 @@ export class DirectoryPickerController extends TypertRemoteService {
   @Remote('list')
   async list(path: string | undefined, signal: AbortSignal): Promise<DirectoryListing> {
     const capability = this.requireCapability('browse', 'list')
+    const root = this.pickerRoot()
+    if (root !== undefined && path !== undefined && !new TenantGuard(this.ctx).visible(path)) {
+      throw new RemoteError(
+        'directory-picker/forbidden',
+        `"${path}" is outside your workspace and the shared directory`,
+        { path },
+      )
+    }
     try {
-      return await capability.list(path, signal)
+      return await capability.list(root !== undefined && path === undefined ? root : path, signal)
     } catch (error: unknown) {
       throw cancellableFailure(error, signal, 'directory listing was aborted')
     }
@@ -95,11 +112,24 @@ export class DirectoryPickerController extends TypertRemoteService {
       )
     }
     const capability = this.requireCapability('browse', 'createDirectory')
+    if (this.pickerRoot() !== undefined && !new TenantGuard(this.ctx).visible(request.data.path)) {
+      throw new RemoteError(
+        'directory-picker/forbidden',
+        `"${request.data.path}" is outside your workspace and the shared directory`,
+        { path: request.data.path },
+      )
+    }
     try {
       return await capability.createDirectory(request.data.path, request.data.name)
     } catch (error: unknown) {
       throw browseFailure(error)
     }
+  }
+
+  /** The tenant picker root, absent in single-user compositions. */
+  private pickerRoot(): string | undefined {
+    const tenant = this.ctx.reflect.get('authTenant') as PickerTenant | undefined
+    return tenant?.pickerRoot()
   }
 
   /** Resolve the capability one wire verb needs, or refuse with the kind this backend serves. */

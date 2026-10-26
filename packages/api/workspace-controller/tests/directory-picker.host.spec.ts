@@ -103,6 +103,27 @@ describe('directoryPicker pick Remote', () => {
   })
 })
 
+describe('directoryPicker tenant scope', () => {
+  it('starts at the tenant root and refuses levels outside it', async () => {
+    StubPicker.capabilityStub = BROWSE_STUB
+    const ctx = new Context()
+    roots.push(ctx)
+    await ctx.plugin(StubPicker).await()
+    ctx.provide('authTenant', {
+      visible: (path: string) => path.startsWith('/tenant'),
+      sessionVisible: () => true,
+      isSystemAdmin: () => false,
+      pickerRoot: () => '/tenant',
+    })
+    const picker = new DirectoryPickerController(ctx)
+    const signal = new AbortController().signal
+    expect((await picker.list(undefined, signal)).path).toBe('/tenant')
+    expect((await refused(picker.list('/elsewhere', signal))).code).toBe('directory-picker/forbidden')
+    expect((await refused(picker.createDirectory('/elsewhere', 'child'))).code).toBe('directory-picker/forbidden')
+    expect(await picker.createDirectory('/tenant/work', 'child')).toBe('/tenant/work/child')
+  })
+})
+
 describe('directoryPicker browse Remotes', () => {
   it('serves listings and creation, defaulting to the home directory', async () => {
     const picker = await harness(BROWSE_STUB)

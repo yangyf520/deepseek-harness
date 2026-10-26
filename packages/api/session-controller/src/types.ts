@@ -212,6 +212,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       readonly requestedCwd: string
       readonly existingCwd?: string
     }
+    'session/cwd-forbidden': { readonly cwd: string }
+    'session/not-visible': { readonly sessionId: SessionId }
     'session/projections-unavailable': Record<string, never>
     'session/writer-held': { readonly sessionId: SessionId }
     'session/agent-busy': { readonly reason: string }
