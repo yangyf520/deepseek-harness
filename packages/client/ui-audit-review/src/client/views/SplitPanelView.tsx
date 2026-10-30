@@ -215,6 +215,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
             >
               <FindingCard
                 finding={finding}
+                documentPath={state.documentPath}
                 index={index}
                 round={state.round}
                 t={t}

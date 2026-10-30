@@ -14,8 +14,9 @@ const NON_TEXT_SOURCE = /\.(?:docx?|xlsx?|pptx?|pdf|png|jpe?g|gif|webp|zip|gz|ta
  * @param props - Finding, current decision and injected operations.
  * @returns The review card, including failed-operation recovery.
  */
-export function FindingCard({ finding, index, round, t, onDecide, onApply, decided, severityLabels, rating, tags }: {
+export function FindingCard({ finding, documentPath, index, round, t, onDecide, onApply, decided, severityLabels, rating, tags }: {
   finding: AuditFinding
+  documentPath?: string
   index: number
   round: number
   t: ViewProps['t']
@@ -36,7 +37,7 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
   const severityLabel = severityLabels?.[severity] ?? t(`severity.${severity}`)
   const summary = findingSummary(finding)
   const codeFinding = isCodePath(finding.anchor.path)
-  const canApplyToSource = !NON_TEXT_SOURCE.test(finding.anchor.path)
+  const canApplyToSource = !NON_TEXT_SOURCE.test(documentPath ?? finding.anchor.path)
 
   const decide = async (decision: AuditDecision): Promise<void> => {
     if (inFlight.current) return

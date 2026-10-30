@@ -127,6 +127,7 @@ function DocumentColumn({ group, state, metadata, t, onDecide, onApply }: {
           <FindingCard
             key={`${state.round}:${finding.id}`}
             finding={finding}
+            documentPath={state.documentPath}
             index={index}
             round={state.round}
             t={t}

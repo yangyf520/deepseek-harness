@@ -46,8 +46,8 @@ it('acknowledges evidence without changing the file', async () => {
 it('keeps DOCX decisions in the review until the modified document is exported', async () => {
   const onDecide = vi.fn().mockResolvedValue(true)
   const onApply = vi.fn().mockResolvedValue(true)
-  const docxFinding = { ...finding, anchor: { ...finding.anchor, path: 'contract.docx' } }
-  render(<FindingCard finding={docxFinding} index={0} round={1} t={t} onDecide={onDecide} onApply={onApply} />)
+  const docxFinding = { ...finding, anchor: { ...finding.anchor, path: 'contract.html' } }
+  render(<FindingCard finding={docxFinding} documentPath="contract.docx" index={0} round={1} t={t} onDecide={onDecide} onApply={onApply} />)
   fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
   await waitFor(() => expect(onDecide).toHaveBeenCalledWith('f1', 1, 'accept'))
   expect(onApply).not.toHaveBeenCalled()
