@@ -7,6 +7,8 @@ import { splitBasis } from '../regulation.ts'
 import { RatingBadge, TagChips } from './CapabilityBadges.tsx'
 import css from './ReviewPresentation.module.css'
 
+const NON_TEXT_SOURCE = /\.(?:docx?|xlsx?|pptx?|pdf|png|jpe?g|gif|webp|zip|gz|tar)$/i
+
 /**
  * Shared evidence, decision and file-application controls for review layouts.
  * @param props - Finding, current decision and injected operations.
@@ -34,6 +36,7 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
   const severityLabel = severityLabels?.[severity] ?? t(`severity.${severity}`)
   const summary = findingSummary(finding)
   const codeFinding = isCodePath(finding.anchor.path)
+  const canApplyToSource = !NON_TEXT_SOURCE.test(finding.anchor.path)
 
   const decide = async (decision: AuditDecision): Promise<void> => {
     if (inFlight.current) return
@@ -46,7 +49,7 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
         setOutcome('decision-error')
         return
       }
-      const changesDocument = finding.replacement !== undefined && (decision === 'accept' || decided === 'accept')
+      const changesDocument = canApplyToSource && finding.replacement !== undefined && (decision === 'accept' || decided === 'accept')
       if (changesDocument) {
         phase = 'apply'
         if (!await onApply(finding.id, round)) {

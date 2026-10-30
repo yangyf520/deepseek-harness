@@ -43,6 +43,17 @@ it('acknowledges evidence without changing the file', async () => {
   expect(onApply).not.toHaveBeenCalled()
 })
 
+it('keeps DOCX decisions in the review until the modified document is exported', async () => {
+  const onDecide = vi.fn().mockResolvedValue(true)
+  const onApply = vi.fn().mockResolvedValue(true)
+  const docxFinding = { ...finding, anchor: { ...finding.anchor, path: 'contract.docx' } }
+  render(<FindingCard finding={docxFinding} index={0} round={1} t={t} onDecide={onDecide} onApply={onApply} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
+  await waitFor(() => expect(onDecide).toHaveBeenCalledWith('f1', 1, 'accept'))
+  expect(onApply).not.toHaveBeenCalled()
+  expect(screen.queryByRole('status')).toBeNull()
+})
+
 it('allows undo from the same shared card', async () => {
   const onDecide = vi.fn().mockResolvedValue(true)
   const onApply = vi.fn().mockResolvedValue(true)
