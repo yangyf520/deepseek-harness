@@ -30,7 +30,7 @@ const DOCUMENT_STYLES = `
   [data-audit-document][data-document-kind='html'] { max-width: 900px; min-height: calc(100% - 24px); margin: 12px auto; padding: 36px 48px; border: 0.5px solid var(--_audit-border); border-radius: var(--dsw-radius-xs); background: var(--_audit-bg); box-shadow: 0 2px 12px color-mix(in srgb, var(--_audit-text) 8%, transparent); }
   [data-audit-document][data-document-kind='docx'] { width: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
   [data-audit-document][data-document-kind='docx'] .docx-wrapper { min-height: 100%; padding: 12px 0; overflow: visible; background: transparent; }
-  [data-audit-document][data-document-kind='docx'] .docx { width: calc(100% - 12px); max-width: calc(100% - 12px); margin: 0 auto 12px; border: 0.5px solid var(--_audit-border); box-shadow: 0 2px 12px color-mix(in srgb, var(--_audit-text) 8%, transparent); }
+  [data-audit-document][data-document-kind='docx'] .docx { width: calc(100% - 24px); max-width: calc(100% - 24px); margin: 0 auto 12px; border: 0.5px solid var(--_audit-border); box-shadow: 0 2px 12px color-mix(in srgb, var(--_audit-text) 8%, transparent); }
   [data-audit-document][data-document-kind='docx'] .docx > article { padding-right: 24px; padding-left: 24px; }
   [data-audit-document] * { box-sizing: border-box; }
   [data-audit-document] h1 { font-size: 1.8em; font-weight: 700; margin: 0.8em 0 0.4em; }
@@ -200,7 +200,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
             <span className={css.rejectedCount}>{rejected} {t('status.rejected')}</span>
           </div>
         </div>
-        <div style={{ padding: '16px' }}>
+        <div style={{ display: 'grid', gap: '16px', padding: '16px' }}>
           {findings.map((finding, index) => (
             <div
               key={`${state.round}:${finding.id}`}
@@ -211,7 +211,6 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
                 cursor: 'pointer',
                 outline: selectedId === finding.id ? '2px solid var(--dsw-alias-state-business-primary)' : 'none',
                 borderRadius: 'var(--dsw-radius-sm)',
-                marginBottom: '12px',
               }}
             >
               <FindingCard

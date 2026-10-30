@@ -71,7 +71,6 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
       border: '0.5px solid var(--dsw-alias-border-l4)',
       borderRadius: 'var(--dsw-radius-sm)',
       background: 'var(--dsw-alias-bg-base)',
-      marginBottom: '8px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px', paddingBottom: '8px', borderBottom: '0.5px solid var(--dsw-alias-border-l4)' }}>
         <span className={css.severityTag} style={{
