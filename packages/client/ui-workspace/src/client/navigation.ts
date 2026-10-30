@@ -410,6 +410,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const reconcile = (): void => {
       if (this.lifetime.signal.aborted) return
       if (this.clearArchivedCurrent()) return
+      if (this.clearUnavailableCurrent()) return
       if (initial !== 'waiting') return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
@@ -484,6 +485,16 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const current = this.mainReference?.sessionId
     if (current === undefined
       || !this.workspaces.list.getSnapshot().archivedSessionIds.includes(current)) return false
+    this.clearMain()
+    return true
+  }
+
+  /** @returns true when a ready Session catalog no longer exposes the selected main Session. */
+  private clearUnavailableCurrent(): boolean {
+    const current = this.mainReference?.sessionId
+    if (current === undefined || this.selection.getSnapshot().subagentAddress !== undefined) return false
+    const sessions = this.sessions.list.getSnapshot()
+    if (sessions.phase !== 'ready' || sessions.byId[current] !== undefined) return false
     this.clearMain()
     return true
   }

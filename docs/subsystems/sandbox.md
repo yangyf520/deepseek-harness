@@ -61,6 +61,26 @@ interface SandboxExecutionPolicy {
    * for agentless calls, which fall back to per-call backend state.
    */
   sessionId?: SessionId
+  /**
+   * Tenant identity for multi-user isolation. Backends key per-tenant temp
+   * directories off it (e.g. `/tmp/dsh-tenants/<tenantId>/session-xxx/`),
+   * so different tenants' temporary files stay isolated; absent for
+   * single-user compositions, which fall back to per-session isolation.
+   */
+  tenantId?: string
+  /**
+   * Absolute roots a confined process must not read unless a
+   * {@link readAllowedRoots} entry covers the path. Empty or absent means no
+   * read denial, which is how single-user compositions stay unrestricted.
+   */
+  readDeniedRoots?: readonly string[]
+  /**
+   * Absolute roots a confined process may read even when a
+   * {@link readDeniedRoots} entry covers them. Enforcement prefers the narrow
+   * grant over the wider denial, so a tenant keeps its own workspace while the
+   * deployment home stays closed.
+   */
+  readAllowedRoots?: readonly string[]
 }
 ```
 

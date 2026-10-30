@@ -166,14 +166,16 @@ export class SandboxPolicyService extends Service {
     const { session } = request
     const reads = this.readRoots()
     const cwd = session?.header.cwd
-    const gate = this.ctx.reflect.get('authTenant') as { writable?(path: string): boolean } | undefined
+    const gate = this.ctx.reflect.get('authTenant') as { writable?(path: string): boolean; tenantId?(): string | undefined } | undefined
     const writable = cwd === undefined || (gate?.writable?.(cwd) ?? true)
     const requested = request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode
+    const tenantId = gate?.tenantId?.()
     return {
       mode: writable ? requested : 'read-only',
       workspaceRoot: resolveWorkspaceRoot(cwd ?? this.workspaceRoot),
       ...session === undefined ? {} : { sessionId: session.id },
       ...reads === undefined ? {} : { readDeniedRoots: reads.deny, readAllowedRoots: reads.allow },
+      ...tenantId === undefined ? {} : { tenantId },
     }
   }
 

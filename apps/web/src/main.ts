@@ -9,12 +9,31 @@ interface DesktopBootGlobal {
   }
 }
 const desktop = (globalThis as DesktopBootGlobal).dshDesktopBoot
+const SESSION_SELECTION_KEY = 'dsh.sessions.current'
+const AUTH_SCOPED_SELECTION_VERSION_KEY = 'dsh.sessions.auth-scoped-selection'
+const AUTH_SCOPED_SELECTION_VERSION = '1'
+const AUTH_COMPLETED_PARAM = 'dsh-auth-completed'
+
+/** Drop a selection that may belong to the identity active before this Web login. */
+function resetCrossIdentitySelection(): void {
+  if (desktop !== undefined) return
+  const url = new URL(window.location.href)
+  const loginCompleted = url.searchParams.has(AUTH_COMPLETED_PARAM)
+  const migrated = localStorage.getItem(AUTH_SCOPED_SELECTION_VERSION_KEY) === AUTH_SCOPED_SELECTION_VERSION
+  if (loginCompleted || !migrated) localStorage.removeItem(SESSION_SELECTION_KEY)
+  localStorage.setItem(AUTH_SCOPED_SELECTION_VERSION_KEY, AUTH_SCOPED_SELECTION_VERSION)
+  if (!loginCompleted) return
+  url.searchParams.delete(AUTH_COMPLETED_PARAM)
+  window.history.replaceState(window.history.state, '', url)
+}
+
 const reportFailure = (reason: unknown): void => {
   if (desktop === undefined) throw reason
   void desktop.failed(reason instanceof Error ? reason.message : String(reason)).catch(console.error)
 }
 
 try {
+  resetCrossIdentitySelection()
   const el = document.getElementById('root')
   if (el === null) throw new Error('web app: missing #root')
   const entry = new AppWebEntry(el)

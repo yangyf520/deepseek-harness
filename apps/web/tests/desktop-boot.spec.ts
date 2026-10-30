@@ -15,6 +15,8 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.resetModules()
   document.body.replaceChildren()
+  localStorage.clear()
+  window.history.replaceState(null, '', '/')
 })
 
 it('forwards client initialization failures to native recovery', async () => {
@@ -50,6 +52,30 @@ it('leaves browser failure presentation with the Web boot kernel', async () => {
   vi.stubGlobal('dshDesktopBoot', undefined)
   await import('../src/main.ts')
   expect(boot.run).toHaveBeenCalledWith(undefined)
+})
+
+it('drops the legacy saved Session before the first authenticated Web boot', async () => {
+  document.body.innerHTML = '<div id="root"></div>'
+  localStorage.setItem('dsh.sessions.current', JSON.stringify({ sessionId: 'old' }))
+  vi.stubGlobal('dshDesktopBoot', undefined)
+
+  await import('../src/main.ts')
+
+  expect(localStorage.getItem('dsh.sessions.current')).toBeNull()
+  expect(localStorage.getItem('dsh.sessions.auth-scoped-selection')).toBe('1')
+})
+
+it('drops the saved Session after each Web login and consumes the callback marker', async () => {
+  document.body.innerHTML = '<div id="root"></div>'
+  localStorage.setItem('dsh.sessions.auth-scoped-selection', '1')
+  localStorage.setItem('dsh.sessions.current', JSON.stringify({ sessionId: 'previous-identity' }))
+  window.history.replaceState(null, '', '/?token=launch&dsh-auth-completed=1')
+  vi.stubGlobal('dshDesktopBoot', undefined)
+
+  await import('../src/main.ts')
+
+  expect(localStorage.getItem('dsh.sessions.current')).toBeNull()
+  expect(window.location.search).toBe('?token=launch')
 })
 
 it.each(['root', 'readiness'])('reports missing %s before client plugin startup', async (missing) => {

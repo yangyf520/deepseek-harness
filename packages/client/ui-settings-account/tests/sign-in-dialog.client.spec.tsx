@@ -38,6 +38,7 @@ it.each([en, zh])('requires a user action after timeout', async (copy) => {
 it.each([en, zh])('shows waiting actions and cancels before dismissing', async (copy) => {
   const props = mount({ id, phase: 'waiting-browser', authorizeUrl: 'https://platform.deepseek.com/dsh/authorize?state=example' }, copy)
   expect(screen.getByRole('button', { name: copy.waiting }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('link', { name: copy.open }).getAttribute('href')).toBe('https://platform.deepseek.com/dsh/authorize?state=example&theme=dark')
   await expect(`${screen.getByRole('dialog').textContent}\n`).toMatchFileSnapshot(`./expected/login-waiting-${copy === en ? 'en' : 'zh'}.txt`)
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: copy.cancel })) })
   expect(props.cancel).toHaveBeenCalledExactlyOnceWith(id)

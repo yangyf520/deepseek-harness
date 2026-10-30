@@ -565,7 +565,7 @@ describe('RightbarSeat presentation', () => {
     expect(panel.style.width).toBe('420px')
     fireEvent.click(element(h.view.container, '[data-sidebar-right-mode]'))
     expect(h.layout().mode).toBe('fullscreen')
-    expect(panel.style.width).toBe('100vw')
+    expect(panel.style.width).toBe('1440px')
     expect(panel.dataset['sidebarRightPanel']).toBe('fullscreen')
     expect(element(h.view.container, '[data-tab-body]')).toBe(body)
     expect(h.frame.openRightbar).toHaveBeenLastCalledWith(true, true)

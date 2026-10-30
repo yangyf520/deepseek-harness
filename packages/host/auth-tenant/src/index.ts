@@ -52,7 +52,10 @@ export interface TenantContext {
 /** Request-scoped tenant context; this module is its only reader and writer. */
 const tenantAls = new AsyncLocalStorage<TenantContext>()
 
-/** Read the current request's tenant context, if any. */
+/**
+ * Read the current request's tenant context, if any.
+ * @returns The current tenant context, or undefined outside a tenant request.
+ */
 export function currentTenant(): TenantContext | undefined {
   return tenantAls.getStore()
 }
@@ -91,17 +94,27 @@ export function isSpaceVisible(spacePath: string, tenant?: TenantContext): boole
 
 /* ── Tenant root resolution ─────────────────────────────────────────────── */
 
-/** Compute the tenant's picker root: $DSH_HOME/users/<tenantId>/ */
+/**
+ * Compute the tenant's picker root: $DSH_HOME/users/<tenantId>/.
+ * @param tenantId - Tenant identifier used as the user-root directory name.
+ * @returns The tenant's absolute user root.
+ */
 export function tenantUserRoot(tenantId: string): string {
   return dshHomePath('users', tenantId)
 }
 
-/** Compute the shared directory: $DSH_HOME/shared/ */
+/**
+ * Compute the shared directory: $DSH_HOME/shared/.
+ * @returns The absolute shared-space root.
+ */
 export function sharedDir(): string {
   return dshHomePath('shared')
 }
 
-/** The DSH home directory holding credentials and all tenant data. */
+/**
+ * Read the DSH home directory holding credentials and all tenant data.
+ * @returns The resolved DSH home directory.
+ */
 export function dshHome(): string {
   return resolveDshHome()
 }
@@ -160,9 +173,9 @@ function isTenantReadDenied(path: string, tenant: TenantContext, sessionId: stri
   // Everything outside $DSH_HOME is outside this model's reach too: tenant
   // workspaces live under their own root, so the host's home, SSH keys, and
   // project .env files never become model input.
-  if (!isUnder(target, dshHome())) return true
-  if (isUnder(target, tenant.userRoot)) return false
-  if (isUnder(target, sharedDir())) return false
+  if (!isUnder(target, canonicalTarget(dshHome()))) return true
+  if (isUnder(target, canonicalTarget(tenant.userRoot))) return false
+  if (isUnder(target, canonicalTarget(sharedDir()))) return false
   return true
 }
 
@@ -203,6 +216,7 @@ export class AuthTenant extends Service {
 
   /**
    * Bind an auth principal to a tenant context. Called from auth-gate's OAuth callback.
+   * @param principal - Authenticated principal to bind.
    * @returns the tenant root directory path.
    */
   bindAuthPrincipal(principal: AuthPrincipal): string | undefined {
@@ -231,6 +245,14 @@ export class AuthTenant extends Service {
    */
   pickerRoot(): string | undefined {
     return currentTenant()?.userRoot
+  }
+
+  /**
+   * The current request's tenant identity for multi-user isolation.
+   * @returns the tenant id, or undefined outside a tenant request.
+   */
+  tenantId(): string | undefined {
+    return currentTenant()?.tenantId
   }
 
   /**

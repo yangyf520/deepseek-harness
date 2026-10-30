@@ -118,30 +118,36 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
   const highCount = severities.filter(s => s === 'high').length
   const mediumCount = severities.filter(s => s === 'medium').length
   const lowCount = severities.filter(s => s === 'low').length
+  const hasReplacements = state.findings.some(f => f.replacement !== undefined && f.replacement !== '')
+  const accepted = Object.entries(state.decisions).filter(([, d]) => d === 'accept').length
+  const rejected = Object.entries(state.decisions).filter(([, d]) => d === 'reject').length
+  const hasDecisions = accepted + rejected > 0
 
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px',
-      border: '1px solid rgb(234, 236, 240)', borderRadius: '6px',
+      border: '1px solid var(--dsw-alias-border-l4)', borderRadius: '6px',
     }}>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <strong style={{ fontSize: '12px' }}>{t('overview.title')}</strong>
-        <span style={{ fontSize: '11px', color: 'rgb(102, 112, 133)' }}>
-          {findings.length} {t('overview.findings')}
+        <strong style={{ fontSize: '12px' }}>{state.cardTitle ?? t('overview.title')}</strong>
+        <span style={{ fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }}>
+          {hasDecisions
+            ? <>{accepted} {t('status.accepted')} · {rejected} {t('status.rejected')} · {findings.length - accepted - rejected} {t('overview.findings')}</>
+            : (state.summary ?? `${findings.length} ${t('overview.findings')}`)}
         </span>
         {highCount > 0 && (
           <span style={{ fontSize: '11px', color: SEVERITY_COLOR.high }}>
-            {t('severity.high')} {highCount}
+            {state.severityLabels?.high ?? t('severity.high')} {highCount}
           </span>
         )}
         {mediumCount > 0 && (
           <span style={{ fontSize: '11px', color: SEVERITY_COLOR.medium }}>
-            {t('severity.medium')} {mediumCount}
+            {state.severityLabels?.medium ?? t('severity.medium')} {mediumCount}
           </span>
         )}
         {lowCount > 0 && (
           <span style={{ fontSize: '11px', color: SEVERITY_COLOR.low }}>
-            {t('severity.low')} {lowCount}
+            {state.severityLabels?.low ?? t('severity.low')} {lowCount}
           </span>
         )}
       </div>
@@ -158,7 +164,7 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
             }}>{i + 1}</span>
             <span style={{
               background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
-              borderRadius: '4px', fontSize: '10px', padding: '0 5px',
+              borderRadius: '999px', fontSize: '10px', padding: '0 5px',
             }}>{t(`severity.${severity}`)}</span>
             <span style={{
               flex: '1 1 0%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -167,7 +173,7 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
         )
       })}
       {findings.length > 3 && (
-        <div style={{ fontSize: '11px', color: 'rgb(23, 92, 211)', cursor: 'pointer' }}
+        <div style={{ fontSize: '11px', color: 'var(--dsw-alias-state-business-primary)', cursor: 'pointer' }}
           onClick={onOpenReview}>
           +{findings.length - 3} {t('overview.more')}
         </div>
@@ -175,14 +181,16 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
       <div style={{ display: 'flex', gap: '8px' }}>
         <button type="button" onClick={onOpenReview} style={{
           fontSize: '12px', cursor: 'pointer',
-          background: 'rgb(23, 92, 211)', border: 'none', color: 'rgb(255, 255, 255)',
+          background: 'var(--dsw-alias-state-business-primary)', border: 'none', color: '#ffffff',
           borderRadius: '6px', padding: '4px 12px',
         }}>{t('overview.openReview')}</button>
-        <button type="button" onClick={onDownload} style={{
-          fontSize: '12px', cursor: 'pointer',
-          background: 'white', border: '1px solid rgb(234, 236, 240)', color: 'rgb(102, 112, 133)',
-          borderRadius: '6px', padding: '4px 12px',
-        }}>{t('overview.download')}</button>
+        {hasReplacements && (
+          <button type="button" onClick={onDownload} style={{
+            fontSize: '12px', cursor: 'pointer',
+            background: 'transparent', border: '1px solid var(--dsw-alias-border-l4)', color: 'var(--dsw-alias-label-secondary)',
+            borderRadius: '6px', padding: '4px 12px',
+          }}>{t('overview.download')}</button>
+        )}
       </div>
     </div>
   )

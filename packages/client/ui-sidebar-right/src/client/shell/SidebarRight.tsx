@@ -139,6 +139,7 @@ interface PanelProps {
   readonly useStore: Store['useStore']
   readonly occurrence: SidebarRightInjected['occurrence']
   readonly fullscreen: boolean
+  readonly viewportWidth: number
   readonly autoFullscreen: boolean
   readonly active: boolean
   readonly retainTab: RightbarSeatProps['retainTab']
@@ -300,15 +301,15 @@ function PanelChrome({ sessionId, fullscreen, actions, t, shortcuts, toggleFulls
  * anchored to the frame's right edge and slid off it while collapsed.
  */
 function SidebarPanel(panel: PanelProps & { width: number; panelRef: RefObject<HTMLDivElement> }): ReactNode {
-  const { sessionId, surface, actions, t, renderSlot, openTab, width, reportRoom, fullscreen, panelRef } = panel
+  const { sessionId, surface, actions, t, renderSlot, openTab, width, viewportWidth, reportRoom, fullscreen, panelRef } = panel
   const { expanded } = surface.layout
   const types = panel.useTabTypes(value => value)
   return (
     <div
       ref={panelRef}
       className={css.panel}
-      style={{ width: fullscreen ? '100vw' : width,
-        '--dsh-sidebar-width': fullscreen ? '100vw' : `${width}px` } as CSSProperties}
+      style={{ width: fullscreen ? `${viewportWidth}px` : width,
+        '--dsh-sidebar-width': `${fullscreen ? viewportWidth : width}px` } as CSSProperties}
       data-sidebar-right-session={sessionId}
       data-sidebar-right-panel={fullscreen ? 'fullscreen' : 'push'}
       data-sidebar-right-open={expanded || undefined}
@@ -417,7 +418,7 @@ export function RightbarSeat({
   if (surface === undefined) return null
   const panel: PanelProps = {
     sessionId, actions, t, renderSlot, surface, openTab, closeTab, useTabTypes, useTabNavigation, useStore, occurrence,
-    fullscreen, autoFullscreen, reportRoom, active, retainTab, shortcuts, splitPane, toggleFullscreen,
+    fullscreen, viewportWidth, autoFullscreen, reportRoom, active, retainTab, shortcuts, splitPane, toggleFullscreen,
   }
   return <SidebarPanel {...panel} width={width} panelRef={panelRef} />
 }

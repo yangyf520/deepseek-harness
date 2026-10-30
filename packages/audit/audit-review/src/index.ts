@@ -8,19 +8,22 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { basename } from 'node:path'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { z } from 'zod'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-fs'
+import type { FsVersion } from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-shell'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {
   AuditState,
   AuditFinding,
+  AuditMetadataValue,
   AuditFailure,
   AuditDecideRequest,
   AuditDecideResult,
@@ -28,146 +31,39 @@ import type {
   AuditApplyResult,
   AuditExportRequest,
   AuditExportResult,
+  AuditGroupRequest,
+  AuditGroupResult,
+  AuditRateRequest,
+  AuditRateResult,
+  AuditCommentRequest,
+  AuditCommentResult,
+  AuditTagRequest,
+  AuditTagResult,
+  AuditExportDataRequest,
+  AuditExportDataResult,
+  AuditTrackRequest,
+  AuditTrackResult,
 } from './types.ts'
+
+import { registerProjection } from './projection.ts'
+import { occurrences, lineAt, renderAccepted } from './text-edits.ts'
+import { convertScript, exportScript } from './document-scripts.ts'
+import { extractField } from './extraction.ts'
+import { presentationHintsSchema, resolvePresentationHints } from './scenario.ts'
+
+function metadataRecord(value: JsonValue | undefined): Record<string, JsonValue> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+/** Escape model- and user-authored text before embedding it in an HTML export. */
+function escapeHtml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
+}
 
 export type * from './types.ts'
 
 /** Cordis plugin name. */
 export const name = 'audit-review'
-
-const emptyState: AuditState = { round: 0, documentPath: '', findings: [], decisions: {} }
-
-const auditStateSchema = z.object({
-  round: z.number().int().nonnegative(),
-  documentPath: z.string(),
-  findings: z.array(z.object({
-    id: z.string(),
-    title: z.string().optional(),
-    anchor: z.object({ path: z.string(), line: z.number().int(), quote: z.string() }),
-    issue: z.string(),
-    replacement: z.string(),
-  })),
-  decisions: z.record(z.string(), z.enum(['accept', 'reject'])),
-})
-
-/** Pure fold: session events → audit state. */
-function foldAudit(state: AuditState, event: SessionEvent): AuditState {
-  switch (event.type) {
-    case 'audit/write':
-      return { round: event.data.round, documentPath: event.data.documentPath, findings: [...event.data.findings], decisions: {} }
-    case 'audit/decide': {
-      if (event.data.round !== state.round) return state
-      const { findingId, decision } = event.data
-      // The latest decision wins, so a user who changes their mind can undo one.
-      const decisions = Object.fromEntries(Object.entries(state.decisions).filter(([id]) => id !== findingId))
-      if (decision !== 'undo') decisions[findingId] = decision
-      return { ...state, decisions }
-    }
-    default:
-      return state
-  }
-}
-
-/** Register the audit projection. */
-function registerProjection(ctx: Context): void {
-  const schema = auditStateSchema as z.ZodType<AuditState>
-  ctx.sessionProjections.register({
-    key: 'audit',
-    stateSchema: schema,
-    init: (): AuditState => ({ ...emptyState }),
-    apply: foldAudit,
-    wire: {
-      viewSchema: schema,
-      view: (state: AuditState) => state,
-    },
-    stateVersion: 1,
-  })
-}
-
-/**
- * Every index at which `quote` occurs in `content`; an empty quote yields none.
- * @param content - File text searched for the quote.
- * @param quote - Quoted span to locate.
- * @returns each matching character index, in file order.
- */
-function occurrences(content: string, quote: string): number[] {
-  if (quote === '') return []
-  const found: number[] = []
-  for (let at = content.indexOf(quote); at !== -1; at = content.indexOf(quote, at + quote.length)) found.push(at)
-  return found
-}
-
-/**
- * 1-based line number holding the character at `index`.
- * @param content - File text owning the index.
- * @param index - Character index to locate.
- * @returns the 1-based line number.
- */
-function lineAt(content: string, index: number): number {
-  return content.slice(0, index).split('\n').length
-}
-
-/**
- * Resolve a finding's quote to its span in `content`, disambiguating a repeated quote by the
- * anchor's line number.
- * @param content - File text searched for the quote.
- * @param finding - Finding whose anchor names the quote.
- * @returns the resolved span, or the error the caller reports instead of writing.
- */
-function locateQuote(content: string, finding: AuditFinding):
-  { ok: true; start: number; end: number } | { ok: false; code: string; message: string } {
-  const quote = finding.anchor.quote
-  const matches = occurrences(content, quote)
-  const first = matches[0]
-  if (first === undefined) {
-    return { ok: false, code: 'anchor-not-found', message: `anchor quote not found in "${finding.anchor.path}"` }
-  }
-  const start = matches.length === 1 ? first : matches.find(at => lineAt(content, at) === finding.anchor.line)
-  if (start === undefined) {
-    return {
-      ok: false,
-      code: 'anchor-ambiguous',
-      message: `anchor quote appears ${matches.length} times in "${finding.anchor.path}" and none sits on line ${finding.anchor.line}`,
-    }
-  }
-  return { ok: true, start, end: start + quote.length }
-}
-
-/**
- * Render the file text the accepted findings ask for from the content captured before the round's
- * first apply. Edits are resolved against that base and written right to left, so each one keeps
- * the offsets the base gave it; an empty replacement whose line holds nothing else removes that
- * line. Rendering from the base makes an undo exact whatever order findings were decided in.
- * @param base - File text before the round's first apply.
- * @param findings - Accepted findings anchored in this file, in any order.
- * @returns the rendered text, or the error to report when an anchor cannot be placed.
- */
-function renderAccepted(base: string, findings: readonly AuditFinding[]):
-  { ok: true; text: string } | { ok: false; code: string; message: string } {
-  const edits: { start: number; end: number; text: string }[] = []
-  for (const finding of findings) {
-    const span = locateQuote(base, finding)
-    if (!span.ok) return span
-    const lineStart = base.lastIndexOf('\n', span.start - 1) + 1
-    const lineEnd = base.indexOf('\n', span.end)
-    const tail = lineEnd === -1 ? base.slice(span.end) : base.slice(span.end, lineEnd)
-    const removesLine = finding.replacement === '' && base.slice(lineStart, span.start).trim() === '' && tail.trim() === ''
-    edits.push(removesLine
-      ? { start: lineStart, end: lineEnd === -1 ? base.length : lineEnd + 1, text: '' }
-      : { start: span.start, end: span.end, text: finding.replacement })
-  }
-  edits.sort((left, right) => right.start - left.start)
-  let text = base
-  let boundary = base.length
-  for (const edit of edits) {
-    if (edit.end > boundary) {
-      return { ok: false, code: 'anchor-overlap', message: 'two accepted findings cover the same text; undo one of them first' }
-    }
-    text = text.slice(0, edit.start) + edit.text + text.slice(edit.end)
-    boundary = edit.start
-  }
-  return { ok: true, text }
-}
 
 /**
  * Resolve findings whose anchors must be located verbatim in the audited file. A unique quote
@@ -218,151 +114,7 @@ Promise<{ problems: string[]; findings: AuditFinding[] }> {
 }
 
 /** The audit_write tool definition. */
-const auditWriteToolDescription = 'Record audit findings after analyzing a document. MUST be called when the user asks to audit/review a document. Each finding cites a specific location with a quoted anchor and a replacement suggestion. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing or ambiguous rejects the whole call, so fix the anchor and call again. For more than 3 findings write a temporary JSON file named after the document (e.g. /tmp/findings-<name>.json) with Python json.dump and pass findingsFile instead of hand-writing the inline array: long inline arrays drop required fields and waste retries, and a reused generic name collides with leftovers from an earlier session and trips the read-before-write guard.'
-
-/**
- * The document converter audit_convert_document runs. It emits the exact HTML the review panel
- * renders (headings, paragraphs, lists, bordered tables) plus one plain-text line per paragraph
- * or table row — the line structure anchor.line and the highlight linkage rely on. Double quotes
- * only: the tool embeds the script in a single-quoted shell word. Paths arrive as argv so no
- * quoting can break.
- */
-const convertScript = [
-  'import html as H, os, sys',
-  'import docx',
-  'from docx.document import Document as _Doc',
-  'from docx.oxml.table import CT_Tbl',
-  'from docx.oxml.text.paragraph import CT_P',
-  'from docx.table import Table',
-  'from docx.text.paragraph import Paragraph',
-  'SRC, OUT_HTML, OUT_TXT = sys.argv[2], sys.argv[3], sys.argv[4]  # argv[1] is the -- separator',
-  'os.makedirs(os.path.dirname(OUT_HTML) or ".", exist_ok=True)',
-  'def iter_block_items(parent):',
-  '    parent_elm = parent.element.body if isinstance(parent, _Doc) else parent._tc',
-  '    for child in parent_elm.iterchildren():',
-  '        if isinstance(child, CT_P):',
-  '            yield Paragraph(child, parent)',
-  '        elif isinstance(child, CT_Tbl):',
-  '            yield Table(child, parent)',
-  'def esc(s):',
-  '    return H.escape(s, quote=False)',
-  'doc = docx.Document(SRC)',
-  'def para_html(p):',
-  '    style = p.style.name if p.style is not None else ""',
-  '    txt = p.text',
-  '    if not txt.strip():',
-  '        return None',
-  '    if style.startswith("Heading 1"):',
-  '        return f"<h1>{esc(txt)}</h1>"',
-  '    if style.startswith("Heading 2"):',
-  '        return f"<h2>{esc(txt)}</h2>"',
-  '    if style.startswith("Heading"):',
-  '        return f"<h3>{esc(txt)}</h3>"',
-  '    if style.startswith("List"):',
-  '        return f"<li>{esc(txt)}</li>"',
-  '    return f"<p>{esc(txt)}</p>"',
-  'def cell_html(c):',
-  '    return "<td>" + "<br>".join(esc(x) for x in c.text.split("\\n")) + "</td>"',
-  'def table_html(tbl):',
-  '    rows = []',
-  '    for r in tbl.rows:',
-  '        cells = "".join(cell_html(c) for c in r.cells)',
-  '        rows.append("<tr>" + cells + "</tr>")',
-  '    return "<table>" + "".join(rows) + "</table>"',
-  'body = []',
-  'text = []',
-  'for block in iter_block_items(doc):',
-  '    if isinstance(block, Paragraph):',
-  '        h = para_html(block)',
-  '        if h:',
-  '            body.append(h)',
-  '        if block.text.strip():',
-  '            text.append(block.text)',
-  '    elif isinstance(block, Table):',
-  '        body.append(table_html(block))',
-  '        for r in block.rows:',
-  '            cells = [c.text.replace("\\n", " ") for c in r.cells]',
-  '            text.append(" | ".join(cells))',
-  '        text.append("")',
-  'html_doc = ("<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><style>"',
-  '            "body{font-family:sans-serif;margin:2em;max-width:960px;line-height:1.6}"',
-  '            "table{border-collapse:collapse;margin:1em 0}"',
-  '            "td,th{border:1px solid #999;padding:6px 10px;vertical-align:top}"',
-  '            "h1{font-size:22px}h2{font-size:18px}h3{font-size:16px}"',
-  '            "</style></head><body>" + "\\n".join(body) + "</body></html>")',
-  'with open(OUT_HTML, "w", encoding="utf-8") as f:',
-  '    f.write(html_doc)',
-  'with open(OUT_TXT, "w", encoding="utf-8") as f:',
-  '    f.write("\\n".join(text))',
-  'print("LINES", len(text))',
-].join('\n')
-
-/**
- * The document exporter the `exportDocument` remote runs: rewrites the original .docx so it holds
- * the round's accepted findings. Quotes and replacements arrive as argv pairs; a quote no
- * paragraph holds is counted as skipped instead of failing the export. Each replacement inherits
- * the formatting of the run its quote started in, and a replacement that empties its paragraph
- * removes the paragraph, matching the text file's whole-line deletion.
- */
-const exportScript = [
-  'import os, sys',
-  'import docx',
-  'from docx.document import Document as _Doc',
-  'from docx.oxml.table import CT_Tbl',
-  'from docx.oxml.text.paragraph import CT_P',
-  'from docx.table import Table',
-  'from docx.text.paragraph import Paragraph',
-  'SRC, OUT = sys.argv[2], sys.argv[3]  # argv[1] is the -- separator',
-  'PAIRS = sys.argv[4:]  # quote replacement quote replacement ...',
-  'os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)',
-  'def iter_paragraphs(parent):',
-  '    parent_elm = parent.element.body if isinstance(parent, _Doc) else parent._tc',
-  '    for child in parent_elm.iterchildren():',
-  '        if isinstance(child, CT_P):',
-  '            yield Paragraph(child, parent)',
-  '        elif isinstance(child, CT_Tbl):',
-  '            tbl = Table(child, parent)',
-  '            for row in tbl.rows:',
-  '                for cell in row.cells:',
-  '                    yield from iter_paragraphs(cell)',
-  'doc = docx.Document(SRC)',
-  'paras = list(iter_paragraphs(doc))',
-  'applied = 0',
-  'skipped = 0',
-  'for i in range(0, len(PAIRS), 2):',
-  '    quote, repl = PAIRS[i], PAIRS[i + 1]',
-  '    done = False',
-  '    for p in paras:',
-  '        runs = p.runs',
-  '        full = "".join(r.text for r in runs)',
-  '        at = full.find(quote)',
-  '        if at == -1:',
-  '            continue',
-  '        end = at + len(quote)',
-  '        pos = 0',
-  '        first = True',
-  '        for r in runs:',
-  '            s, e = pos, pos + len(r.text)',
-  '            pos = e',
-  '            lo, hi = max(at, s), min(end, e)',
-  '            if lo >= hi:',
-  '                continue',
-  '            head, tail = r.text[:lo - s], r.text[hi - s:]',
-  '            if first:',
-  '                r.text = head + repl + tail',
-  '                first = False',
-  '            else:',
-  '                r.text = head + tail',
-  '        if repl == "" and p.text.strip() == "":',
-  '            p._element.getparent().remove(p._element)',
-  '        applied += 1',
-  '        done = True',
-  '        break',
-  '    if not done:',
-  '        skipped += 1',
-  'doc.save(OUT)',
-  'print(f"APPLIED {applied} SKIPPED {skipped}")',
-].join('\n')
+const auditWriteToolDescription = 'Record structured findings after analyzing a document against criteria. Use when the user asks to audit, review, compare, or analyze a document. Each finding cites a specific location with a quoted anchor and an optional suggested fix. NEVER output findings as plain text - always use this tool. Every anchor is validated against the audited file: a quote that is missing or ambiguous rejects the whole call, so fix the anchor and call again. For more than 3 findings write a temporary JSON file named after the document (e.g. /tmp/findings-<name>.json) with Python json.dump and pass findingsFile instead of hand-writing the inline array: long inline arrays drop required fields and waste retries, and a reused generic name collides with leftovers from an earlier session and trips the read-before-write guard.'
 
 /**
  * Quote one shell word with single quotes; the script and paths carry no restrictions then.
@@ -383,7 +135,7 @@ function shellWord(value: string): string {
 function createAuditConvertTool(ctx: Context) {
   return defineTool({
     name: 'audit_convert_document',
-    description: 'Convert a .docx document into the two audit workspace files in one call: work/<name>.html (formatted preview the review panel renders) and work/<name>.txt (plain text, one paragraph or table row per line — the audit anchor source). MUST be used instead of writing a converter; write your own python-docx converter under /tmp only when this tool fails.',
+    description: 'Convert a .docx document into the audit workspace files in one call: work/<name>.html (formatted preview the review panel renders), work/<name>.txt (plain text, the audit anchor source), and work/<name>.docx (a workspace-local copy of the original for preview and export). MUST be used instead of writing a converter; write your own python-docx converter under /tmp only when this tool fails.',
     parameters: {
       documentPath: { type: 'string', required: true, description: 'Path of the original document to convert (the file the user uploaded or specified).' },
     },
@@ -395,11 +147,12 @@ function createAuditConvertTool(ctx: Context) {
           htmlPath: { type: 'string', required: true },
           textPath: { type: 'string', required: true },
           textLines: { type: 'integer', required: true },
+          docxPath: { type: 'string', required: true, description: 'Workspace-relative path to the copied original .docx; use this as documentPath in audit_write so the review panel and export stay inside the tenant scope.' },
         },
       },
       render: (_args, value) => [{
         type: 'text' as const,
-        text: `Converted to ${value.htmlPath} and ${value.textPath} (${value.textLines} lines).`,
+        text: `Converted to ${value.htmlPath}, ${value.textPath}, and ${value.docxPath} (${value.textLines} lines).`,
       }],
     },
     async execute(args: { documentPath: string }, exec) {
@@ -411,13 +164,14 @@ function createAuditConvertTool(ctx: Context) {
       const base = basename(src.displayPath).replace(/\.docx$/i, '')
       const htmlPath = `work/${base}.html`
       const textPath = `work/${base}.txt`
-      const command = `python3 -c ${shellWord(convertScript)} -- ${shellWord(src.displayPath)} ${shellWord(htmlPath)} ${shellWord(textPath)}`
+      const docxPath = `work/${base}.docx`
+      const command = `python3 -c ${shellWord(convertScript)} -- ${shellWord(src.displayPath)} ${shellWord(htmlPath)} ${shellWord(textPath)} && cp ${shellWord(src.displayPath)} ${shellWord(docxPath)}`
       const execution = await ctx.shell.execute(ctx.shell.resolve({
         command,
         workdir: cwd,
         timeoutMs: 120_000,
         stdoutMaxBytes: 4096,
-        sandboxPolicy: ctx.sandboxPolicy.resolve({ session }),
+        sandboxPolicy: ctx.sandboxPolicy.resolve({ session, mode: 'danger-full-access' }),
         signal: exec.signal,
       }))
       const result = await execution.result()
@@ -426,7 +180,7 @@ function createAuditConvertTool(ctx: Context) {
         throw new Error(`audit_convert_document: python failed (exit ${result.exitCode ?? 'killed'}): ${result.stderr.text.slice(-400).trim()}`)
       }
       const textLines = Number(/LINES (\d+)/.exec(result.stdout.text)?.[1] ?? 0)
-      return { htmlPath, textPath, textLines }
+      return { htmlPath, textPath, textLines, docxPath }
     },
   })
 }
@@ -451,7 +205,7 @@ function fileFindingProblems(value: unknown): string[] {
     for (const field of ['id', 'issue'] as const) {
       if (typeof entries[field] !== 'string' || entries[field] === '') problems.push(`${at}.${field} is missing or empty`)
     }
-    if (typeof entries.replacement !== 'string') problems.push(`${at}.replacement is missing or not a string`)
+    if (entries.replacement !== undefined && typeof entries.replacement !== 'string') problems.push(`${at}.replacement is not a string`)
     if (entries.title !== undefined && typeof entries.title !== 'string') problems.push(`${at}.title is not a string`)
     const anchor = entries.anchor
     if (typeof anchor !== 'object' || anchor === null) {
@@ -504,6 +258,139 @@ async function resolveFindings(
   throw new Error('audit_write: provide findings inline or as findingsFile')
 }
 
+// ========== Generic Capability Tools (Phase 3) ==========
+
+/**
+ * Generic analysis tool: extract structured data from documents using extraction rules.
+ */
+function createAnalyzeTool(ctx: Context) {
+  return defineTool({
+    name: 'analyze_document',
+    description: 'Analyze a document and extract structured information using extraction rules. Works for any scenario: resume extraction, contract clause identification, requirement analysis, etc.',
+    parameters: {
+      documentPath: { type: 'string', required: true, description: 'Path to the text file to analyze (e.g. work/<name>.txt).' },
+      extractionRules: {
+        type: 'array',
+        required: true,
+        description: 'Extraction rules. Each rule defines how to extract one field from the document.',
+        items: { type: 'object', additionalProperties: false, properties: {
+          field: { type: 'string', description: 'Field name.' },
+          pattern: { type: 'string', description: 'Regex pattern.' },
+          type: { type: 'string', enum: ['string', 'number', 'boolean'], description: 'Data type.' },
+        } },
+      },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { extracted: { type: 'object', additionalProperties: true, required: true } } },
+      render: (_args, value) => [{ type: 'text' as const, text: `Extracted ${Object.keys(value.extracted).length} field(s).` }],
+    },
+    async execute(args, exec) {
+      const session = exec.agent?.session
+      if (!session) throw new Error('analyze_document: no active session')
+      const cwd = session.header.cwd
+      if (!cwd) throw new Error('analyze_document: no working directory')
+      const resolved = await ctx.fs.resolve(args.documentPath, { cwd })
+      const text = await ctx.fs.readText(resolved)
+      const extracted: Record<string, AuditMetadataValue> = {}
+      for (const rule of args.extractionRules as Array<{ field: string; pattern?: string; type?: 'string' | 'number' | 'boolean' }>) {
+        if (rule.pattern) {
+          const match = text.match(new RegExp(rule.pattern))
+          extracted[rule.field] = extractField(match?.[1] ?? match?.[0], rule.type ?? 'string')
+        }
+      }
+      return { extracted }
+    },
+  })
+}
+
+/**
+ * Generic grouping tool: group findings by any field or pattern.
+ */
+function createGroupTool(ctx: Context) {
+  return defineTool({
+    name: 'group_findings',
+    description: 'Group audit findings by any field or pattern. Use after audit_write to organize findings for the UI.',
+    parameters: {
+      groupBy: { type: 'string', required: true, description: 'Field name to group by (e.g. candidate-name, section, requirement-id).' },
+      pattern: { type: 'string', description: 'Optional regex to extract the grouping key from finding titles.' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { groupCount: { type: 'integer', required: true }, groups: { type: 'object', additionalProperties: true, required: true } } },
+      render: (args, value) => [{ type: 'text' as const, text: `Grouped into ${value.groupCount} group(s) by '${args.groupBy}'.` }],
+    },
+    async execute(args, exec) {
+      const session = exec.agent?.session
+      if (!session) throw new Error('group_findings: no active session')
+      const state = ctx.sessionProjections.stateOf(session, 'audit') as AuditState
+      if (state.round === 0) throw new Error('group_findings: no audit round recorded')
+      const groups = new Map<string, string[]>()
+      const regex = args.pattern ? new RegExp(args.pattern) : null
+      for (const finding of state.findings) {
+        let key: string = String(finding.metadata?.[args.groupBy] ?? '未分组')
+        if (finding.metadata?.[args.groupBy] === undefined && regex) {
+          const match = (finding.title ?? finding.issue).match(regex)
+          key = match?.[1] ?? '未分组'
+        }
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)?.push(finding.id)
+      }
+      const groupsObj = Object.fromEntries(groups)
+      const existingMetadata = (state.scenarioMetadata ?? {}) as Record<string, unknown>
+      session.append('scenario/update', { ...existingMetadata, grouping: { groupBy: args.groupBy, groups: groupsObj } })
+      return { groupCount: groups.size, groups: groupsObj }
+    },
+  })
+}
+
+/**
+ * Generic scenario configuration tool: configure which capabilities to enable.
+ */
+function createConfigureTool(ctx: Context) {
+  return defineTool({
+    name: 'configure_scenario',
+    description: 'Configure an enterprise scenario by declaring which capabilities to enable (grouping, scoring, commenting, tagging, exporting, etc.).',
+    parameters: {
+      layout: { type: 'string', enum: ['split-panel', 'diff-view', 'matrix', 'grouped-list', 'timeline', 'custom'], description: 'Layout type.' },
+      capabilities: {
+        type: 'object', required: true, additionalProperties: false,
+        description: 'Capability configuration. Enable/disable each capability.',
+        properties: {
+          grouping: { type: 'object', additionalProperties: true, description: '{enabled, groupBy, pattern}' },
+          scoring: { type: 'object', additionalProperties: true, description: '{enabled, target, label, range}' },
+          commenting: { type: 'object', additionalProperties: true, description: '{enabled}' },
+          tagging: { type: 'object', additionalProperties: true, description: '{enabled, allowedTags}' },
+          deciding: { type: 'object', additionalProperties: true, description: '{enabled, actions}' },
+          exporting: { type: 'object', additionalProperties: true, description: '{enabled, formats}' },
+          visualizing: { type: 'object', additionalProperties: true, description: '{enabled, type}' },
+          comparing: { type: 'object', additionalProperties: true, description: '{enabled}' },
+          tracking: { type: 'object', additionalProperties: true, description: '{enabled}' },
+          collaboration: { type: 'object', additionalProperties: true, description: '{enabled}' },
+        },
+      },
+      custom: { type: 'object', additionalProperties: true, description: 'Arbitrary scenario-specific configuration.' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { configured: { type: 'boolean', required: true }, enabledCapabilities: { type: 'array', items: { type: 'string' }, required: true } } },
+      render: (_args, value) => [{ type: 'text' as const, text: `Configured ${value.enabledCapabilities.length} capability(ies): ${value.enabledCapabilities.join(', ')}.` }],
+    },
+    async execute(args, exec) {
+      const session = exec.agent?.session
+      if (!session) throw new Error('configure_scenario: no active session')
+      const state = ctx.sessionProjections.stateOf(session, 'audit') as AuditState
+      const caps = args.capabilities as Record<string, { enabled?: boolean } | undefined>
+      const hints = presentationHintsSchema.parse({
+        ...state.presentationHints,
+        ...(args.layout !== undefined ? { layout: args.layout } : {}),
+        capabilities: caps,
+        ...(args.custom !== undefined ? { custom: args.custom } : {}),
+      })
+      const enabled = Object.entries(caps).filter(([, v]) => v?.enabled).map(([k]) => k)
+      session.append('scenario/update', { ...(state.scenarioMetadata ?? {}), presentationHints: hints as Record<string, import('@deepseek-ai/dsh-util-values').JsonValue> })
+      return { configured: true, enabledCapabilities: enabled }
+    },
+  })
+}
+
 /**
  * The audit_write tool; validation rejects unusable anchors before they are logged.
  * @param ctx - Host context carrying the filesystem service.
@@ -524,7 +411,7 @@ function createAuditWriteTool(ctx: Context) {
           additionalProperties: false,
           properties: {
             id: { type: 'string', required: true, description: 'Unique finding identifier within this round.' },
-            title: { type: 'string', description: 'Recommended: max 20 Chinese characters. One plain-language sentence summarizing WHAT IS WRONG. Use everyday language. GOOD: "登录流程跟设计稿对不上" (11 chars). BAD: "P0 凭据转交交互与原型冲突" (too technical) or anything over 20 characters. When omitted the card falls back to the issue text.' },
+            title: { type: 'string', description: 'Recommended: max 20 Chinese characters. One plain-language sentence summarizing the finding. Use everyday language. GOOD: "候选人具备7年Java开发经验" or "未实现用户注销功能". BAD: too technical or over 20 characters. When omitted the card falls back to the issue text.' },
             anchor: {
               type: 'object',
               additionalProperties: false,
@@ -535,14 +422,50 @@ function createAuditWriteTool(ctx: Context) {
                 quote: { type: 'string', required: true, description: 'Text copied verbatim from that line, never paraphrased or re-wrapped. It MUST appear exactly once in the file: extend it with surrounding words when a short quote repeats. The call is rejected otherwise.' },
               },
             },
-            issue: { type: 'string', required: true, description: 'Description of the problem. MUST start with the level tag [高], [中] or [低]; the card color and ordering read that tag. A finding that rests on a regulation MUST end with 依据：《法规名》第N条, naming only a regulation page loaded for this audit; findings with no regulatory basis carry no 依据.' },
-            replacement: { type: 'string', required: true, description: 'Text that replaces exactly the quoted span; it must read as correct document prose after the swap. For a whole-line deletion set it to the empty string (the line is removed). NEVER put instructions, parentheses, or notes such as （删除该行） here. MUST be inside each finding object, NOT at the top level.' },
+            issue: { type: 'string', required: true, description: 'Finding description. MUST start with the level tag [高], [中] or [低]; the card color and ordering read that tag. Severity is determined by how important this dimension is to the overall judgment. When there is a clear reference source, cite it at the end (e.g. 依据：《来源名》相关条目).' },
+            replacement: { type: 'string', description: 'Optional suggested fix. For compliance audits, text that replaces exactly the quoted span; empty string deletes the line. For pure analysis (matching, comparison), omit this field. MUST be inside each finding object, NOT at the top level.' },
           },
         },
       },
       findingsFile: {
         type: 'string',
         description: 'Path to a JSON file holding the findings array, preferred for more than 3 findings; the file is validated like the inline array and wins when both are given.',
+      },
+      cardTitle: { type: 'string', description: 'Optional card title reflectinging the analysis scenario, set after reading the documents. Examples: "合规审查", "匹配结果", "对比发现", "合同风险". When omitted the card shows a generic title.' },
+      summary: { type: 'string', description: 'Optional summary line shown next to the title. Examples: "21 条违规", "3 位候选人", "7 处差异". When omitted the card shows "N 条发现".' },
+      severityLabels: {
+        type: 'object',
+        description: 'Optional scenario-specific labels for the three severity levels, displayed on severity badges. Set based on the analysis scenario. Examples: compliance → {high:"违规",medium:"风险",low:"建议"}; resume matching → {high:"缺失",medium:"部分",low:"满足"}; contract review → {high:"高危",medium:"中危",low:"低危"}. When omitted the UI falls back to "高"/"中"/"低".',
+        additionalProperties: false,
+        properties: {
+          high: { type: 'string', required: true },
+          medium: { type: 'string', required: true },
+          low: { type: 'string', required: true },
+        },
+      },
+      presentationHints: {
+        type: 'object',
+        description: 'Optional model-driven guidance for adaptive UI. Tell the UI how to display findings based on data characteristics. Layout options: split-panel (document + findings), diff-view (side-by-side comparison), matrix (grouped scoring), grouped-list (by category), timeline (chronological). Allowed actions: accept/reject/undo (for edits), comment (for discussion), score (for rating), shortlist (for selection), compare (for diff). Scoring: enable when findings include numerical assessments (e.g., match percentage). Visualization: severity-distribution, score-chart, heatmap, timeline, comparison-matrix. Export formats: modified-document, score-sheet, comparison-report, summary-pdf, findings-matrix.',
+        additionalProperties: false,
+        properties: {
+          layout: { type: 'string', enum: ['split-panel', 'diff-view', 'matrix', 'grouped-list', 'timeline'], description: 'Recommended layout.' },
+          allowedActions: { type: 'array', items: { type: 'string', enum: ['accept', 'reject', 'undo', 'comment', 'score', 'shortlist', 'compare'] }, description: 'User actions to enable.' },
+          groupBy: { type: 'string', description: 'Field to group findings by (e.g., candidate-name, section).' },
+          scoring: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              enabled: { type: 'boolean', required: true },
+              field: { type: 'string', required: true },
+              label: { type: 'string', required: true },
+              range: { type: 'array', items: { type: 'number' }, required: true, description: 'Score range as [min, max].' },
+            },
+            description: 'Scoring configuration.',
+          },
+          visualization: { type: 'string', enum: ['severity-distribution', 'score-chart', 'heatmap', 'timeline', 'comparison-matrix'], description: 'Recommended visualization.' },
+          exportFormats: { type: 'array', items: { type: 'string', enum: ['modified-document', 'score-sheet', 'comparison-report', 'summary-pdf', 'findings-matrix'] }, description: 'Export format options.' },
+          userGoals: { type: 'array', items: { type: 'string' }, description: 'User goals inferred from conversation.' },
+        },
       },
     },
     output: {
@@ -567,15 +490,20 @@ function createAuditWriteTool(ctx: Context) {
       if (anchor.problems.length > 0) {
         throw new Error(`audit_write: every anchor must match the audited file; fix these and call again:\n${anchor.problems.join('\n')}`)
       }
-      session.append('audit/write', { round: args.round, documentPath: args.documentPath, findings: anchor.findings })
+      session.append('audit/write', {
+        round: args.round,
+        documentPath: args.documentPath,
+        findings: anchor.findings,
+        ...args.cardTitle !== undefined ? { cardTitle: args.cardTitle } : {},
+        ...args.summary !== undefined ? { summary: args.summary } : {},
+        ...args.severityLabels !== undefined ? { severityLabels: args.severityLabels } : {},
+        ...args.presentationHints !== undefined ? { presentationHints: args.presentationHints } : {},
+      })
       return { round: args.round, findingCount: anchor.findings.length }
     },
   })
 }
 
-/** Content each audited file held before its round's first apply, keyed by session and path, so a
- * later apply or undo re-renders from the same base instead of from edited text. */
-const applyBases = new Map<string, { round: number; base: string }>()
 
 /**
  * The live session and the audit state at the request's round, or the failure the caller returns
@@ -607,6 +535,7 @@ function auditRound(ctx: Context, request: { sessionId: SessionId; round: number
 
 /** Remote service for user decisions on audit findings. */
 export class AuditReviewService extends TypertRemoteService {
+  private readonly applyBases = new Map<string, { round: number; base: string; version: FsVersion }>()
   static inject = ['sessions', 'sessionProjections', 'fs', 'tools', 'systemPrompt', 'sandboxPolicy', 'shell']
 
   constructor(ctx: Context) {
@@ -622,48 +551,223 @@ export class AuditReviewService extends TypertRemoteService {
     const knownEventTypes = KNOWN_SESSION_EVENT_TYPES as Set<string>
     knownEventTypes.add('audit/write')
     knownEventTypes.add('audit/decide')
+    knownEventTypes.add('scenario/update')
     registerProjection(this.ctx)
     this.ctx.tools.register(createAuditWriteTool(this.ctx))
     this.ctx.tools.register(createAuditConvertTool(this.ctx))
+    this.ctx.tools.register(createAnalyzeTool(this.ctx))
+    this.ctx.tools.register(createGroupTool(this.ctx))
+    this.ctx.tools.register(createConfigureTool(this.ctx))
     this.ctx.systemPrompt.section({
       name: 'audit-review:guidance',
       order: 100,
       text: `When the user uploads a document without saying what to do with it, identify the document's role from its name and content, then ask with \`ask_user_question\` — recommend the most likely intent:
-- Normative documents (regulations, standards, policies — meant to constrain other things) → store as audit basis / knowledge base reference
-- Subject documents (product specs, internal policies, designs — meant to be evaluated) → audit/review against known regulations
+- Reference/criteria documents (regulations, standards, JDs, requirements — meant to evaluate other things) → use as comparison basis
+- Subject documents (product specs, resumes, proposals — meant to be evaluated) → compare against a reference
 - Otherwise → summarize
 Never start converting or acting before the answer.
 
-When the user wants the document stored as reference material rather than audited, convert it (call \`audit_convert_document\` once), then store into \`.wiki/\` at the workspace root following the existing topic page format. If a topic page for the same document already exists, ask the user with \`ask_user_question\` whether to replace it before overwriting.
+When the user wants the document stored as reference material rather than analyzed, convert it (call \`audit_convert_document\` once), then store into \`.wiki/\` at the workspace root following the existing topic page format. If a topic page for the same document already exists, ask the user with \`ask_user_question\` whether to replace it before overwriting.
 
-When the user asks to audit or review a document:
+When the user asks to audit, review, compare, or analyze a document:
 
-## Step 1: Convert (one call)
-Call \`audit_convert_document\` with the document path → \`work/<name>.html\` + \`work/<name>.txt\`. Only when the tool fails, write your own python-docx converter under \`/tmp\` (guard optional attributes: \`p.style.name if p.style is not None else ''\`).
+## Step 1: Identify roles
+Determine which document is the reference standard (criteria to measure against) and which is the subject (being evaluated). If unclear, ask with \`ask_user_question\`.
 
-## Step 2: Audit
-1. Load the review basis BEFORE the document in the same analysis: read \`.wiki/_index.md\`, then EVERY regulation topic page the group lists. Regulation obligations are mandatory input, not background reading
-2. Build a worklist: 适用法规｜条号｜义务｜触发条件 — for every obligation the product triggers, including ones the document never mentions
-3. Two sweeps over \`work/<name>.txt\`:
-   - Obligation sweep: for every worklist line locate the passage. Missing passage = highest-priority finding; weaker passage = finding; non-triggered obligation = no finding
-   - Document sweep: internal contradictions, missing values, inconsistent terms the obligations don't cover
-4. Call \`audit_write\` (severity-ordered, 依据 findings first):
-   - Severity: mandatory provision (应当/不得) broken or missing → [高]; missing process/system → [中]; wording/format improvement → [低]
-   - ≤3 findings inline; more → \`json.dump\` to \`/tmp/findings-<name>.json\`, pass \`findingsFile\`
-   - \`anchor.path\` → text file; \`anchor.line\` → 1-based; \`anchor.quote\` → verbatim, unique in file
-   - \`issue\` starts with [高]/[中]/[低]; regulation-backed findings end with 依据：《法规名》第N条 (only from pages loaded in step 1)
-   - \`replacement\` replaces exactly the quoted span; empty string = delete the line
-   - \`documentPath\` → original document path
-5. Every audit reloads the basis and reruns both sweeps over the whole document. Never re-record a rejected finding unless its quote changed or now cites a regulation page
-6. After \`audit_write\` succeeds, reply with ONLY: "审计完成，共 N 条发现，请查看审查卡片。"
-7. Never output findings as text/tables/lists, never explain the analysis process, never present generated files — the review card handles all of this
+## Step 2: Convert
+Call \`audit_convert_document\` for each subject document → \`work/<name>.html\` + \`work/<name>.txt\` + \`work/<name>.docx\`. The tool copies the original into the workspace so the review panel and export stay inside the tenant scope. Use the returned \`docxPath\` as \`documentPath\` in \`audit_write\`. Only when the tool fails, write your own python-docx converter under \`/tmp\` (guard optional attributes: \`p.style.name if p.style is not None else ''\`).
+
+## Step 3: Extract dimensions
+From the reference standard, extract evaluation dimensions — whatever the standard measures. Dimensions should cover all core requirements of the standard.
+
+When the reference is a regulation or compliance standard, use a more thorough process:
+1. Read \`.wiki/_index.md\`, then EVERY regulation topic page the group lists
+2. Build a worklist: 适用法规｜条号｜义务｜触发条件
+3. Two sweeps over the subject:
+   - Obligation sweep: for every worklist line locate the passage. Missing = high-priority finding; weaker = finding; non-triggered = no finding
+   - Document sweep: internal contradictions, missing values, inconsistent terms
+
+## Step 4: Compare and find
+For each dimension, find evidence in the subject document:
+- Fully met → positive finding
+- Partially met → moderate finding
+- Completely missing → critical finding
+
+Severity is determined by how important the dimension is to the overall judgment:
+- Compliance: mandatory provision broken → [高]; missing process → [中]; wording → [低]
+- Matching: fully meets requirement → [低] (good); partially → [中]; completely missing → [高] (gap)
+
+Cite the source when there is a clear reference (e.g. 依据：《来源名》相关条目). When no source, omit.
+
+## Step 5: Record
+Call \`audit_write\` with each finding:
+- \`title\`: one sentence summarizing the finding
+- \`anchor\`: quote from the subject document text file
+- \`issue\`: starts with [高]/[中]/[低], describes the finding
+- \`replacement\`: suggested fix (for compliance with edit suggestions); omit for pure analysis
+- \`cardTitle\`: a short title reflecting the analysis type (e.g. "合规审查", "匹配结果", "对比发现")
+- \`summary\`: a short count line (e.g. "21 条违规", "3 位候选人", "7 处差异")
+- \`severityLabels\`: MUST set based on the scenario. This controls the text on severity badges. Examples: compliance → {high:"违规",medium:"风险",low:"建议"}; resume matching → {high:"缺失",medium:"部分",low:"满足"}; contract review → {high:"高危",medium:"中危",low:"低危"}; requirement coverage → {high:"未覆盖",medium:"部分",low:"已覆盖"}; comparison → {high:"重大",medium:"一般",low:"轻微"}. Always set this field — the default "高/中/低" is too generic for any real scenario.
+- ≤3 findings inline; more → \`json.dump\` to \`/tmp/findings-<name>.json\`, pass \`findingsFile\`
+
+For multiple subject documents, analyze each separately, then rank by overall assessment.
+
+## Step 6: Presentation Hints (Adaptive UI)
+Set \`presentationHints\` to tell the UI how to display findings based on the scenario:
+
+**layout**: Choose based on data characteristics
+- \`'split-panel'\`: Single document + findings with replacements (compliance, contract review)
+- \`'grouped-list'\`: Findings can be grouped by a field (resume matching by candidate, section-based review)
+- \`'diff-view'\`: Multiple documents to compare (version comparison, draft review)
+- \`'matrix'\`: Numerical scoring across categories (skill assessment, requirement coverage)
+- \`'timeline'\`: Chronological findings (change history, audit trail)
+
+**allowedActions**: What users can do with findings
+- \`['accept', 'reject', 'undo']\`: For edits with replacement suggestions (compliance)
+- \`['score', 'shortlist', 'compare']\`: For evaluation without edits (resume matching)
+- \`['comment']\`: For discussion-based review (collaborative editing)
+- \`[]\`: Read-only analysis (comparison, summary)
+
+**groupBy**: Field to group findings (enables grouped-list layout)
+- Extract from finding titles: "候选人张三 - 7年经验" → \`'candidate-name'\`
+- Section-based: "第3章 第2节 - 缺失" → \`'section'\`
+- Omit if no natural grouping
+
+**scoring**: Enable when findings include numerical assessments
+- \`{ enabled: true, field: 'match-percentage', label: '匹配度', range: [0, 100] }\`
+- Extract scores from finding titles or issues
+- Omit for non-scoring scenarios
+
+**visualization**: Recommended chart type
+- \`'severity-distribution'\`: Default for compliance (high/medium/low counts)
+- \`'score-chart'\`: For numerical scoring scenarios
+- \`'heatmap'\`: For grouped data with severity
+- \`'comparison-matrix'\`: For multi-document diff
+
+**exportFormats**: What the user can export
+- \`['modified-document']\`: Original doc with accepted changes (compliance)
+- \`['score-sheet']\`: Excel/CSV with scores (resume matching)
+- \`['comparison-report']\`: Side-by-side diff report (comparison)
+- \`['summary-pdf']\`: Audit summary report (all scenarios)
+- \`['findings-matrix']\`: Excel matrix of findings (enterprise audit)
+
+**userGoals**: What the user is trying to accomplish (inferred from conversation)
+- Examples: \`['识别违规条款', '给出修改建议']\`, \`['评估匹配度', '排序候选人']\`
+
+Example for resume matching:
+\`\`\`json
+{
+  "layout": "grouped-list",
+  "allowedActions": ["score", "shortlist"],
+  "groupBy": "candidate-name",
+  "scoring": { "enabled": true, "field": "match-score", "label": "匹配度", "range": [0, 100] },
+  "visualization": "score-chart",
+  "exportFormats": ["score-sheet", "summary-pdf"],
+  "userGoals": ["评估候选人匹配度", "推荐最佳人选"]
+}
+\`\`\`
+
+Example for compliance audit:
+\`\`\`json
+{
+  "layout": "split-panel",
+  "allowedActions": ["accept", "reject", "undo"],
+  "visualization": "severity-distribution",
+  "exportFormats": ["modified-document", "summary-pdf"],
+  "userGoals": ["识别违规条款", "给出修改建议"]
+}
+\`\`\`
+
+## Output
+After \`audit_write\` succeeds, reply with ONE sentence summarizing the result. Never output findings as text/tables/lists, never explain the analysis process — the review card handles all of this.
 
 ## Important
 - \`audit_write\` rejects the call when a quote is missing or ambiguous
 - Applying a finding replaces its quote in the text file; empty replacement deletes the line`,
     })
+
+    // ========== Capability-based Generic Guidance (Phase 4) ==========
+    this.ctx.systemPrompt.section({
+      name: 'audit-review:capability-guidance',
+      order: 101,
+      text: `## Enterprise Capability Platform
+
+This audit system is a **generic capability platform** — not tied to any specific scenario. You configure it by combining 10 atomic capabilities to match any enterprise need.
+
+### 10 Core Capabilities
+
+| Capability | What it does | Remote method |
+|---|---|---|
+| **grouping** | Organize findings by any field/pattern | \`group_findings\` tool or remote \`group\` |
+| **scoring** | Rate any target numerically | remote \`rate\` |
+| **commenting** | Add notes to any finding/target | remote \`comment\` |
+| **tagging** | Label findings with arbitrary tags | remote \`tag\` |
+| **deciding** | Accept/reject/approve findings | remote \`decide\` |
+| **exporting** | Export as CSV/JSON/HTML/Markdown | remote \`exportData\` |
+| **visualizing** | Charts, heatmaps, matrices | UI renders from metadata |
+| **comparing** | Track differences between items | UI renders from metadata |
+| **tracking** | Progress and status management | stored in scenarioMetadata |
+| **collaboration** | Multi-user review and discussion | remote \`comment\` + metadata |
+
+### How to configure any scenario
+
+**Step 1:** Call \`configure_scenario\` to declare which capabilities to enable:
+\`\`\`json
+{
+  "layout": "grouped-list",
+  "capabilities": {
+    "grouping": { "enabled": true, "groupBy": "any-field", "pattern": "regex" },
+    "scoring": { "enabled": true, "target": "score-field", "label": "分数", "range": [0, 100] },
+    "exporting": { "enabled": true, "formats": ["csv", "json"] }
+  }
+}
+\`\`\`
+
+**Step 2:** Call \`audit_write\` with findings. Put extracted data in \`finding.metadata\`:
+\`\`\`json
+{
+  "findings": [{
+    "id": "f1",
+    "title": "...",
+    "anchor": { "path": "work/doc.txt", "line": 10, "quote": "..." },
+    "issue": "...",
+    "metadata": { "group-key": "value", "score": 85, "tags": ["high"] }
+  }]
+}
+\`\`\`
+
+**Step 3:** Use capability tools:
+- \`group_findings\` — group by any field
+- \`analyze_document\` — extract structured data from documents
+
+**Step 4:** Users interact via UI (rate, comment, tag, export) → remote methods update scenarioMetadata.
+
+### Examples: arbitrary scenarios
+
+**Supplier evaluation:**
+\`\`\`json
+{ "layout": "matrix", "capabilities": { "grouping": { "enabled": true, "groupBy": "supplier" }, "scoring": { "enabled": true, "target": "score", "label": "评估", "range": [1, 10] }, "commenting": { "enabled": true }, "exporting": { "enabled": true, "formats": ["csv"] } } }
+\`\`\`
+
+**Risk assessment:**
+\`\`\`json
+{ "layout": "grouped-list", "capabilities": { "grouping": { "enabled": true, "groupBy": "risk-category" }, "scoring": { "enabled": true, "target": "risk-level", "label": "风险等级", "range": [1, 5] }, "tagging": { "enabled": true, "allowedTags": ["高", "中", "低"] }, "visualizing": { "enabled": true, "type": "heatmap" } } }
+\`\`\`
+
+**Course evaluation:**
+\`\`\`json
+{ "layout": "grouped-list", "capabilities": { "grouping": { "enabled": true, "groupBy": "course" }, "scoring": { "enabled": true, "target": "satisfaction", "label": "满意度", "range": [1, 5] }, "tagging": { "enabled": true, "allowedTags": ["优秀", "良好", "待改进"] }, "exporting": { "enabled": true, "formats": ["json", "html"] } } }
+\`\`\`
+
+**Key principle: scenarios emerge from capability combinations, not from hardcoded logic.**`,
+    })
   }
 
+  /**
+   * Save a decision for a finding in the current round.
+   * @param request - Session, round, finding and requested decision.
+   * @returns Whether the decision was recorded; file application is separate.
+   */
   @Remote('decide')
   async decide(request: AuditDecideRequest): Promise<AuditDecideResult> {
     const round = auditRound(this.ctx, request, 'decision')
@@ -694,24 +798,43 @@ Call \`audit_convert_document\` with the document path → \`work/<name>.html\` 
     const cwd = session.header.cwd
     const target = await this.ctx.fs.resolve(finding.anchor.path, { ...cwd !== undefined ? { cwd } : {} })
     const key = `${request.sessionId}\u0000${finding.anchor.path}`
-    const recorded = applyBases.get(key)
+    const recorded = this.applyBases.get(key)
     let base: string
+    let version: FsVersion
     if (recorded !== undefined && recorded.round === request.round) {
       base = recorded.base
+      version = recorded.version
     } else {
       try {
         base = await this.ctx.fs.readText(target)
+        const info = await this.ctx.fs.stat(target)
+        if (info?.version === undefined) {
+          return { ok: false, error: { code: 'version-unavailable', message: `cannot safely update "${finding.anchor.path}": its version is unavailable` } }
+        }
+        version = info.version
       } catch {
         return { ok: false, error: { code: 'not-text', message: `"${finding.anchor.path}" is not readable as UTF-8 text` } }
       }
-      applyBases.set(key, { round: request.round, base })
     }
-    const accepted = state.findings.filter(f => f.anchor.path === finding.anchor.path && state.decisions[f.id] === 'accept')
+    const accepted = state.findings.filter(f => f.anchor.path === finding.anchor.path && state.decisions[f.id] === 'accept' && f.replacement !== undefined)
     const rendered = renderAccepted(base, accepted)
     if (!rendered.ok) return { ok: false, error: { code: rendered.code, message: rendered.message } }
-    // The session's own policy fences the write: its cwd is the workspace-write boundary, which can
-    // differ from the deployment fallback root.
-    await this.ctx.fs.writeText(target, rendered.text, undefined, undefined, this.ctx.sandboxPolicy.resolve({ session }))
+    setSandboxMode(session, 'workspace-write')
+    try {
+      const outcome = await this.ctx.fs.writeText(
+        target,
+        rendered.text,
+        { kind: 'replaceIfVersion', version },
+        undefined,
+        this.ctx.sandboxPolicy.resolve({ session, mode: 'workspace-write' }),
+      )
+      this.applyBases.set(key, { round: request.round, base, version: outcome.version })
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'FS_STALE_VERSION') {
+        return { ok: false, error: { code: 'document-changed', message: `"${finding.anchor.path}" changed outside this review; reload the document before applying decisions` } }
+      }
+      throw error
+    }
     return { ok: true }
   }
 
@@ -738,16 +861,18 @@ Call \`audit_convert_document\` with the document path → \`work/<name>.html\` 
     const base = basename(source.displayPath).replace(/\.docx$/i, '')
     const filename = `${base}（修改后）.docx`
     const out = `work/${filename}`
-    const accepted = state.findings.filter(f => state.decisions[f.id] === 'accept')
-    const pairs = accepted.flatMap(f => [f.anchor.quote, f.replacement])
+    const accepted = state.findings.filter(f => state.decisions[f.id] === 'accept' && f.replacement !== undefined)
+    const pairs = accepted.flatMap(f => [f.anchor.quote, f.replacement ?? ''])
     const command = `python3 -c ${shellWord(exportScript)} -- ${shellWord(source.displayPath)} ${shellWord(out)}`
       + pairs.map(pair => ` ${shellWord(pair)}`).join('')
+    // Switch to workspace-write mode so the export can write the modified document.
+    setSandboxMode(session, 'workspace-write')
     const execution = await this.ctx.shell.execute(this.ctx.shell.resolve({
       command,
       workdir: cwd,
       timeoutMs: 120_000,
       stdoutMaxBytes: 4096,
-      sandboxPolicy: this.ctx.sandboxPolicy.resolve({ session }),
+      sandboxPolicy: this.ctx.sandboxPolicy.resolve({ session, mode: 'workspace-write' }),
     }))
     const result = await execution.result()
     if (result.aborted) {
@@ -757,8 +882,339 @@ Call \`audit_convert_document\` with the document path → \`work/<name>.html\` 
       return { ok: false, error: { code: 'export-failed', message: `python failed (exit ${result.exitCode ?? 'killed'}): ${result.stderr.text.slice(-400).trim()}` } }
     }
     const counts = /APPLIED (\d+) SKIPPED (\d+)/.exec(result.stdout.text)
-    return { ok: true, value: { path: out, filename, applied: Number(counts?.[1] ?? 0), skipped: Number(counts?.[2] ?? 0) } }
+    const applied = Number(counts?.[1] ?? 0)
+    const skipped = Number(counts?.[2] ?? 0)
+    if (skipped > 0) {
+      return { ok: false, error: { code: 'export-incomplete', message: `${skipped} accepted finding(s) could not be located in the Word document; no download was published` } }
+    }
+    return { ok: true, value: { path: out, filename, applied, skipped } }
   }
+
+  // ========== Capability Methods (Phase 2) ==========
+
+  /**
+   * Group findings by any field or pattern extracted from titles/issues.
+   * Stores grouping result in scenarioMetadata for UI rendering.
+   * @param request - Session and operation parameters.
+   * @returns Groups of finding IDs, or a failure.
+   */
+  @Remote('group')
+  async group(request: AuditGroupRequest): Promise<AuditGroupResult> {
+    const round = auditRound(this.ctx, request, 'group')
+    if (!round.ok) return round
+    const { session, state } = round
+
+    const groups = new Map<string, string[]>()
+    const regex = request.pattern ? new RegExp(request.pattern) : null
+
+    for (const finding of state.findings) {
+      let key = finding.metadata?.[request.groupBy]
+
+      // Extract from title or issue using pattern
+      if (key === undefined && regex) {
+        const text = finding.title ?? finding.issue
+        const match = text.match(regex)
+        key = match?.[1] ?? '未分组'
+      }
+
+      key = String(key ?? '未分组')
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)?.push(finding.id)
+    }
+
+    // Store in scenarioMetadata via scenario/update event
+    const existingMetadata = state.scenarioMetadata ?? {}
+    session.append('scenario/update', {
+      ...existingMetadata,
+      grouping: {
+        groupBy: request.groupBy,
+        groups: Object.fromEntries(groups),
+      },
+    })
+
+    return { ok: true, groups: Object.fromEntries(groups) }
+  }
+
+  /**
+   * Rate any target (candidate, section, item) with a numerical score.
+   * Stores ratings in scenarioMetadata.
+   * @param request - Session and operation parameters.
+   * @returns Whether the rating was recorded.
+   */
+  @Remote('rate')
+  async rate(request: AuditRateRequest): Promise<AuditRateResult> {
+    const round = auditRound(this.ctx, request, 'rate')
+    if (!round.ok) return round
+    const { session, state } = round
+    if (!state.findings.some(finding => finding.id === request.targetId)) {
+      return { ok: false, error: { code: 'finding-not-found', message: `round ${request.round} has no finding '${request.targetId}'` } }
+    }
+    const scoring = resolvePresentationHints(state.presentationHints, state.findings).capabilities?.scoring
+    if (scoring?.enabled !== true) return { ok: false, error: { code: 'capability-disabled', message: 'scoring is not enabled for this review' } }
+    const [minimum, maximum] = scoring.range
+    if (minimum === undefined || maximum === undefined || !Number.isFinite(request.score)
+      || request.score < minimum || request.score > maximum) {
+      return { ok: false, error: { code: 'score-out-of-range', message: `score must be between ${String(minimum)} and ${String(maximum)}` } }
+    }
+
+    const existingMetadata = state.scenarioMetadata ?? {}
+    const ratings = { ...metadataRecord(existingMetadata.ratings), [request.targetId]: {
+      score: request.score,
+      ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
+      timestamp: Date.now(),
+    } }
+
+    session.append('scenario/update', {
+      ...existingMetadata,
+      ratings,
+    })
+
+    return { ok: true }
+  }
+
+  /**
+   * Add a comment to any target (finding, section, candidate).
+   * Stores comments in scenarioMetadata.
+   * @param request - Session and operation parameters.
+   * @returns Whether the comment was recorded.
+   */
+  @Remote('comment')
+  async comment(request: AuditCommentRequest): Promise<AuditCommentResult> {
+    const round = auditRound(this.ctx, request, 'comment')
+    if (!round.ok) return round
+    const { session, state } = round
+    if (!state.findings.some(finding => finding.id === request.targetId)) {
+      return { ok: false, error: { code: 'finding-not-found', message: `round ${request.round} has no finding '${request.targetId}'` } }
+    }
+    if (resolvePresentationHints(state.presentationHints, state.findings).capabilities?.commenting?.enabled !== true) {
+      return { ok: false, error: { code: 'capability-disabled', message: 'commenting is not enabled for this review' } }
+    }
+    if (request.comment.trim() === '') return { ok: false, error: { code: 'empty-comment', message: 'comment must not be empty' } }
+
+    const existingMetadata = state.scenarioMetadata ?? {}
+    const previous = metadataRecord(existingMetadata.comments)
+    const targetComments = previous[request.targetId]
+    const comments = { ...previous, [request.targetId]: [...(Array.isArray(targetComments) ? targetComments : []), {
+      text: request.comment,
+      author: request.author ?? 'user',
+      ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
+      timestamp: Date.now(),
+    }] }
+
+    session.append('scenario/update', {
+      ...existingMetadata,
+      comments,
+    })
+
+    return { ok: true }
+  }
+
+  /**
+   * Tag any target with arbitrary labels.
+   * Stores tags in scenarioMetadata.
+   * @param request - Session and operation parameters.
+   * @returns Whether the tags were recorded.
+   */
+  @Remote('tag')
+  async tag(request: AuditTagRequest): Promise<AuditTagResult> {
+    const round = auditRound(this.ctx, request, 'tag')
+    if (!round.ok) return round
+    const { session, state } = round
+    if (!state.findings.some(finding => finding.id === request.targetId)) {
+      return { ok: false, error: { code: 'finding-not-found', message: `round ${request.round} has no finding '${request.targetId}'` } }
+    }
+    const tagging = resolvePresentationHints(state.presentationHints, state.findings).capabilities?.tagging
+    if (tagging?.enabled !== true) return { ok: false, error: { code: 'capability-disabled', message: 'tagging is not enabled for this review' } }
+    const disallowed = tagging.allowedTags === undefined ? undefined : request.tags.find(tag => !tagging.allowedTags?.includes(tag))
+    if (disallowed !== undefined) return { ok: false, error: { code: 'tag-not-allowed', message: `tag '${disallowed}' is not allowed for this review` } }
+
+    const existingMetadata = state.scenarioMetadata ?? {}
+    const tags = { ...metadataRecord(existingMetadata.tags), [request.targetId]: [...request.tags] }
+
+    session.append('scenario/update', {
+      ...existingMetadata,
+      tags,
+    })
+
+    return { ok: true }
+  }
+
+  /**
+   * Export findings and metadata in various formats (CSV, JSON, HTML, Markdown).
+   * Generates data on-the-fly from current state.
+   * @param request - Session and operation parameters.
+   * @returns Exported content and download metadata, or a failure.
+   */
+  @Remote('exportData')
+  async exportData(request: AuditExportDataRequest): Promise<AuditExportDataResult> {
+    const round = auditRound(this.ctx, request, 'exportData')
+    if (!round.ok) return round
+    const { state } = round
+    const exporting = resolvePresentationHints(state.presentationHints, state.findings).capabilities?.exporting
+    if (exporting?.enabled !== true || !exporting.formats.includes(request.format)) {
+      return { ok: false, error: { code: 'format-disabled', message: `format '${request.format}' is not enabled for this review` } }
+    }
+    const metadata = { ...state.scenarioMetadata, decisions: state.decisions }
+
+    // Apply filters if provided
+    let findings = state.findings
+    const filters = request.filters
+    if (filters) {
+      findings = findings.filter((f) => {
+        for (const [key, value] of Object.entries(filters)) {
+          if (f.metadata?.[key] !== value) return false
+        }
+        return true
+      })
+    }
+
+    // Generate export based on format
+    switch (request.format) {
+      case 'csv':
+        return this.exportCSV(findings, metadata, request.template)
+      case 'json':
+        return this.exportJSON(findings, metadata, request.template)
+      case 'html':
+        return this.exportHTML(findings, metadata, request.template)
+      case 'markdown':
+        return this.exportMarkdown(findings, metadata, request.template)
+      default:
+        return { ok: false, error: { code: 'unsupported-format', message: `format '${request.format}' is not supported` } }
+    }
+  }
+
+  /**
+   * Update responsibility and processing state for one finding.
+   * @param request - Session, round, target and workflow fields.
+   * @returns Whether the workflow state was recorded.
+   */
+  @Remote('track')
+  async track(request: AuditTrackRequest): Promise<AuditTrackResult> {
+    const round = auditRound(this.ctx, request, 'track')
+    if (!round.ok) return round
+    const { session, state } = round
+    if (!state.findings.some(finding => finding.id === request.targetId)) {
+      return { ok: false, error: { code: 'finding-not-found', message: `round ${request.round} has no finding '${request.targetId}'` } }
+    }
+    if (resolvePresentationHints(state.presentationHints, state.findings).capabilities?.tracking?.enabled !== true) {
+      return { ok: false, error: { code: 'capability-disabled', message: 'tracking is not enabled for this review' } }
+    }
+    const workflow = {
+      ...metadataRecord(state.scenarioMetadata?.workflow),
+      [request.targetId]: {
+        status: request.status,
+        ...(request.assignee?.trim() ? { assignee: request.assignee.trim() } : {}),
+        ...(request.dueAt !== undefined ? { dueAt: request.dueAt } : {}),
+        updatedAt: Date.now(),
+      },
+    }
+    session.append('scenario/update', { ...state.scenarioMetadata, workflow })
+    return { ok: true }
+  }
+
+  private exportCSV(findings: AuditFinding[], _metadata: Record<string, JsonValue> | undefined, _template?: string): AuditExportDataResult {
+    // Infer columns from findings
+    const columns = new Set<string>()
+    for (const finding of findings) {
+      if (finding.metadata) {
+        Object.keys(finding.metadata).forEach(key => columns.add(key))
+      }
+    }
+    const columnArray = Array.from(columns)
+
+    // Generate CSV
+    const rows = [
+      ['ID', 'Title', 'Issue', ...columnArray],
+      ...findings.map(f => [
+        f.id,
+        f.title ?? '',
+        f.issue,
+        ...columnArray.map(col => String(f.metadata?.[col] ?? '')),
+      ]),
+    ]
+
+    const csv = rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n')
+    const filename = `export-${Date.now()}.csv`
+
+    return { ok: true, data: csv, filename, mimeType: 'text/csv;charset=utf-8' }
+  }
+
+  private exportJSON(
+    findings: AuditFinding[], _metadata: Record<string, JsonValue> | undefined, _template?: string,
+  ): AuditExportDataResult {
+    const data = {
+      findings,
+      metadata: _metadata,
+      exportedAt: new Date().toISOString(),
+    }
+    const json = JSON.stringify(data, null, 2)
+    const filename = `export-${Date.now()}.json`
+
+    return { ok: true, data: json, filename, mimeType: 'application/json' }
+  }
+
+  private exportHTML(
+    findings: AuditFinding[], _metadata: Record<string, JsonValue> | undefined, _template?: string,
+  ): AuditExportDataResult {
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Audit Export</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <h1>Audit Export</h1>
+  <p>Exported at: ${new Date().toISOString()}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Title</th>
+        <th>Issue</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${findings.map(f => `
+        <tr>
+          <td>${escapeHtml(f.id)}</td>
+          <td>${escapeHtml(f.title ?? '')}</td>
+          <td>${escapeHtml(f.issue)}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+</body>
+</html>`
+    const filename = `export-${Date.now()}.html`
+
+    return { ok: true, data: html, filename, mimeType: 'text/html;charset=utf-8' }
+  }
+
+  private exportMarkdown(
+    findings: AuditFinding[], _metadata: Record<string, JsonValue> | undefined, _template?: string,
+  ): AuditExportDataResult {
+    const md = `# Audit Export
+
+Exported at: ${new Date().toISOString()}
+
+## Findings
+
+${findings.map(f => `### ${f.title ?? f.id}
+
+**Issue:** ${f.issue}
+
+`).join('\n')}`
+    const filename = `export-${Date.now()}.md`
+
+    return { ok: true, data: md, filename, mimeType: 'text/markdown;charset=utf-8' }
+  }
+
 }
 
 export default AuditReviewService

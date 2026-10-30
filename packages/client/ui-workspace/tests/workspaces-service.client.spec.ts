@@ -1445,6 +1445,35 @@ describe('UiWorkspaceService', () => {
     expect(b.selectPanel).toHaveBeenCalledTimes(2)
   })
 
+  it('clears a selected Session when an authenticated catalog no longer exposes it', () => {
+    const backing = persistSelection({})
+    const current = summary('previous-tenant')
+    const b = bench({
+      workspaces: workspaceState(),
+      sessions: sessionState([current]),
+    })
+    b.uiWorkspace.openSession(current.id)
+
+    b.sessions.list.set(sessionState())
+
+    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+    expect(JSON.parse(backing.get('dsh.sessions.current')!)).toEqual({})
+    expect(b.selectPanel).toHaveBeenLastCalledWith(null)
+  })
+
+  it('waits for the authenticated Session baseline before clearing a selected Session', () => {
+    const current = summary('current')
+    const b = bench({
+      workspaces: workspaceState(),
+      sessions: sessionState([current]),
+    })
+    b.uiWorkspace.openSession(current.id)
+
+    b.sessions.list.set(sessionState([], 'pending'))
+
+    expect(b.sessions.retained[0]!.release).not.toHaveBeenCalled()
+  })
+
   it('clears a selected Session after archiving it without an intervening snapshot', async () => {
     const b = bench()
     b.workspaces.onArchive = async () => {}

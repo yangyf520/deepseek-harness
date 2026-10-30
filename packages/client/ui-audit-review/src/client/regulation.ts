@@ -118,7 +118,11 @@ export function splitBasis(issue: string): { prose: string; citations: Regulatio
   return { prose, citations: dedupe([...cited, ...citationsIn(prose)]) }
 }
 
-/** One citation as the card displays it. */
+/**
+ * Format one citation as the card displays it.
+ * @param resolved - Citation with its canonical regulation title.
+ * @returns The regulation title enclosed in Chinese book-title marks.
+ */
 export function citationLabel(resolved: ResolvedCitation): string {
   return `《${resolved.title}》`
 }

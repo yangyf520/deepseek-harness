@@ -315,7 +315,7 @@ it('coalesces refreshes, publishes independent failures, and rejects stale respo
   expect(actions.hooks.account.getSnapshot().details?.profile).toEqual({ status: 'failed' })
 }, 60_000)
 
-for (const desktop of [false, true]) it(`uses the browser or Desktop login carrier (Desktop: ${desktop}) and exposes operation errors`, async ({ start, mock }) => {
+for (const desktop of [false, true]) it(`starts browser or Desktop login without opening an intermediate page (Desktop: ${desktop}) and exposes operation errors`, async ({ start, mock }) => {
   const open = vi.spyOn(window, 'open').mockReturnValue(null)
   if (desktop) vi.stubGlobal('dshDesktop', {})
   const c = await start()
@@ -324,8 +324,7 @@ for (const desktop of [false, true]) it(`uses the browser or Desktop login carri
   await actions.start()
   expect(mock.remote.account.startSignIn).toHaveBeenCalledWith(expect.objectContaining({ locale: 'en', version: '0.0.0-test' }),
     window.location.origin, desktop ? 'desktop' : 'web')
-  // Only a plain browser preopens the authorization tab during the click.
-  expect(open).toHaveBeenCalledTimes(desktop ? 0 : 1)
+  expect(open).not.toHaveBeenCalled()
   const failure = { ok: false as const, error: new RemoteError('gateway/internal', 'offline', {}) }
   mock.remote.account.startSignIn.mockResolvedValueOnce(failure)
   await expect(actions.start()).rejects.toThrow('account start failed')
@@ -338,21 +337,6 @@ for (const desktop of [false, true]) it(`uses the browser or Desktop login carri
   await actions.signOut()
   // The launcher renders nothing, so the refused Remote call reaches the caller unchanged.
   await expect(actions.signOut()).rejects.toBe(failure.error)
-}, 60_000)
-
-it('navigates the preopened browser tab to the themed authorization page', async ({ start, mock }) => {
-  const replace = vi.fn()
-  const popup: Pick<Window, 'closed' | 'close' | 'opener'> & { location: Pick<Location, 'replace'> } = { closed: false, close: vi.fn(), opener: window, location: { replace } }
-  // jsdom opens no real tab; the UI only touches these members of the preopened window.
-  vi.spyOn(window, 'open').mockReturnValue(popup as Window)
-  const c = await start()
-  const actions = operations(c)
-  const attempt = { id: 'attempt' as SignInAttemptId, phase: 'waiting-browser' as const, authorizeUrl: 'https://platform.deepseek.com/dsh/authorize' }
-  mock.remote.account.startSignIn.mockResolvedValue(ok({ ...view, attempt: { id: attempt.id, phase: 'initializing' } }))
-  await actions.start()
-  c.mock.streams.push('account/watch', { ...view, attempt })
-  const theme = (c.ctx.get('theme') as ThemeRuntime).getTheme().active.colorScheme
-  await vi.waitFor(() => { expect(replace).toHaveBeenCalledExactlyOnceWith(`${attempt.authorizeUrl}?theme=${theme}`) })
 }, 60_000)
 
 it('uses the Desktop stream origin and exposes the native platform bridge', async ({ start, mock }) => {

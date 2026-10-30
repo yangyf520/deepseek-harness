@@ -28,9 +28,14 @@ export interface AuthPrincipal {
   user: AuthUser
 }
 
+/** Cookie name that carries the authenticated browser identity. */
 export const IDENTITY_COOKIE = 'dsh-identity'
 
-/** Derive role from SUPER_ADMIN_USERS env — server-authoritative, never from cookie. */
+/**
+ * Derive role from SUPER_ADMIN_USERS env — server-authoritative, never from cookie.
+ * @param user - Authenticated provider user.
+ * @returns The server-authoritative application role.
+ */
 export function resolveRole(user: AuthUser): 'admin' | 'member' {
   const allowlist = process.env.SUPER_ADMIN_USERS
     ?.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) ?? []
@@ -51,6 +56,11 @@ function pathnameOf(req: IncomingMessage): string {
   return new URL(req.url ?? '/', 'http://x').pathname
 }
 
+/**
+ * Parse the request Cookie header into name-value entries.
+ * @param req - Incoming browser request.
+ * @returns Parsed cookie values, or an empty record when the header is absent.
+ */
 export function parseCookies(req: IncomingMessage): Record<string, string> {
   const cookie = req.headers.cookie
   if (!cookie) return {}
@@ -69,7 +79,11 @@ function setIdentityCookie(res: ServerResponse, user: AuthUser): void {
   res.setHeader('set-cookie', `${IDENTITY_COOKIE}=${json}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`)
 }
 
-/** Read the authenticated user from the identity cookie, if present. */
+/**
+ * Read the authenticated user from the identity cookie, if present.
+ * @param req - Incoming browser request.
+ * @returns The decoded user, or undefined for a missing or invalid cookie.
+ */
 export function userFromCookie(req: IncomingMessage): AuthUser | undefined {
   const raw = parseCookies(req)[IDENTITY_COOKIE]
   if (!raw) return undefined
@@ -121,8 +135,10 @@ const OAUTH2_PRESETS = {
   },
 } as const satisfies Record<string, OAuth2Preset>
 
+/** Supported built-in OAuth provider preset identifier. */
 export type BuiltinPreset = keyof typeof OAUTH2_PRESETS
 
+/** Configuration for one OAuth login channel. */
 export interface ChannelConfig {
   preset: BuiltinPreset
   enabled: boolean
@@ -155,6 +171,12 @@ function enabledChannels(channels: Record<string, ChannelConfig>): [string, Chan
 
 /* ── OAuth flow ─────────────────────────────────────────────────────────── */
 
+/**
+ * Resolve a loopback redirect URI against the hostname used by the request.
+ * @param configured - Redirect URI from channel configuration.
+ * @param req - Request whose Host header identifies the visible server address.
+ * @returns The effective redirect URI.
+ */
 export function effectiveRedirectUri(
   configured: string,
   req: { headers: { host?: string | string[] | undefined } },
@@ -354,8 +376,9 @@ function completeHandler(getAuthenticatedUrl: (base: string) => string, req: Inc
   const token = url.searchParams.get('token')
   if (!token) { res.writeHead(400); res.end('missing token'); return }
   const host = Array.isArray(req.headers.host) ? req.headers.host[0] : req.headers.host
-  const redirect = host ? getAuthenticatedUrl(`http://${host}/`) : '/'
-  res.writeHead(303, { location: redirect, 'cache-control': 'no-store' })
+  const redirect = new URL(host ? getAuthenticatedUrl(`http://${host}/`) : '/', `http://${host ?? 'dsh.invalid'}`)
+  redirect.searchParams.set('dsh-auth-completed', '1')
+  res.writeHead(303, { location: host ? redirect.toString() : `${redirect.pathname}${redirect.search}`, 'cache-control': 'no-store' })
   res.end()
 }
 

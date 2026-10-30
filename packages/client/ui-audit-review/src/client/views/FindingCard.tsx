@@ -1,0 +1,134 @@
+/** Shared finding presentation and operation state across review layouts. */
+import { useMemo, useRef, useState } from 'react'
+import type { AuditDecision, AuditFinding, AuditState } from '@deepseek-ai/dsh-audit-review/types'
+import type { ViewProps } from './types.ts'
+import { parseIssue, findingSummary, SEVERITY_BG, SEVERITY_COLOR } from '../AuditCard.tsx'
+import { splitBasis } from '../regulation.ts'
+import { RatingBadge, TagChips } from './CapabilityBadges.tsx'
+
+/** Header border color per decision. */
+const DECISION_BORDER: Record<'accept' | 'reject' | 'pending', string> = {
+  accept: 'var(--dsw-alias-state-success-primary, rgb(34, 139, 34))',
+  reject: 'var(--dsw-alias-state-error-primary, rgb(217, 45, 32))',
+  pending: 'var(--dsw-alias-border-l4)',
+}
+
+/**
+ * Shared evidence, decision and file-application controls for review layouts.
+ * @param props - Finding, current decision and injected operations.
+ * @returns The review card, including failed-operation recovery.
+ */
+export function FindingCard({ finding, index, round, t, onDecide, onApply, decided, severityLabels, rating, tags }: {
+  finding: AuditFinding
+  index: number
+  round: number
+  t: ViewProps['t']
+  onDecide: ViewProps['onDecide']
+  onApply: ViewProps['onApply']
+  decided?: 'accept' | 'reject' | undefined
+  severityLabels?: AuditState['severityLabels']
+  rating?: { score: number } | undefined
+  tags?: string[] | undefined
+}) {
+  const [deciding, setDeciding] = useState(false)
+  const [outcome, setOutcome] = useState<'decision-error' | 'apply-skipped' | null>(null)
+  const inFlight = useRef(false)
+  const issueText = finding.issue ?? ''
+  const parsed = parseIssue(issueText)
+  const { prose } = useMemo(() => splitBasis(parsed.text), [parsed.text])
+  const severity = parsed.severity
+  const severityLabel = severityLabels?.[severity] ?? t(`severity.${severity}`)
+  const summary = findingSummary(finding)
+
+  const decide = async (decision: AuditDecision): Promise<void> => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setDeciding(true)
+    setOutcome(null)
+    let phase: 'decision' | 'apply' = 'decision'
+    try {
+      if (!await onDecide(finding.id, round, decision)) {
+        setOutcome('decision-error')
+        return
+      }
+      const changesDocument = finding.replacement !== undefined && (decision === 'accept' || decided === 'accept')
+      if (changesDocument) {
+        phase = 'apply'
+        if (!await onApply(finding.id, round)) {
+          setOutcome('apply-skipped')
+        }
+      }
+    } catch (error) {
+      void error
+      setOutcome(phase === 'apply' ? 'apply-skipped' : 'decision-error')
+    } finally {
+      inFlight.current = false
+      setDeciding(false)
+    }
+  }
+
+  return (
+    <div style={{
+      padding: '12px',
+      border: `1px solid ${DECISION_BORDER[decided ?? 'pending']}`,
+      borderRadius: '12px',
+      background: 'var(--dsw-alias-bg-base)',
+      marginBottom: '8px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+        <span style={{
+          background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity],
+          borderRadius: '999px', minHeight: '26px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+          padding: '0 10px 0 4px', fontSize: '10px', fontWeight: 500, flexShrink: 0,
+        }}>
+          <span style={{
+            width: '14px', height: '14px', borderRadius: '50%',
+            background: SEVERITY_COLOR[severity], color: 'white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '9px', fontWeight: 500, flexShrink: 0,
+          }}>{index + 1}</span>
+          {severityLabel}
+        </span>
+        <span style={{ flex: '1 1 0%', minWidth: 0, fontSize: '12px', fontWeight: 500, lineHeight: 1.4, color: 'var(--dsw-alias-label-primary)' }}>{summary}</span>
+        <TagChips tags={tags} />
+        <RatingBadge rating={rating} />
+        {decided === undefined ? (
+          <>
+            <button type="button" disabled={deciding} onClick={() => { void decide('accept') }} style={{
+              padding: '4px 12px', fontSize: '12px', cursor: deciding ? 'wait' : 'pointer',
+              background: 'var(--dsw-alias-state-success-primary)', color: '#ffffff', border: 'none', borderRadius: '12px',
+              height: '24px',
+            }}>{deciding ? '…' : (finding.replacement !== undefined ? t('action.accept') : t('action.acknowledge'))}</button>
+            <button type="button" disabled={deciding} onClick={() => { void decide('reject') }} style={{
+              padding: '4px 12px', fontSize: '12px', cursor: deciding ? 'wait' : 'pointer',
+              background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', border: '1px solid var(--dsw-alias-state-error-primary)', borderRadius: '12px',
+              height: '24px',
+            }}>{deciding ? '…' : (finding.replacement !== undefined ? t('action.reject') : t('action.ignore'))}</button>
+          </>
+        ) : <>
+          <span style={{ fontSize: '12px', color: decided === 'accept' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)', fontWeight: 500 }}>
+            {t(decided === 'accept' ? 'status.accepted' : 'status.rejected')}
+          </span>
+          <button type="button" disabled={deciding} onClick={() => { void decide('undo') }} style={{
+            padding: '4px 12px', fontSize: '12px', cursor: deciding ? 'wait' : 'pointer',
+            background: 'transparent', color: 'var(--dsw-alias-label-secondary)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: '12px', height: '24px',
+          }}>{t('action.undo')}</button>
+        </>}
+      </div>
+      <div style={{ fontSize: '13px', marginBottom: '8px', lineHeight: 1.4, padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', borderRadius: '12px', color: 'var(--dsw-alias-label-primary)' }}>
+        {prose}
+      </div>
+      {finding.replacement !== undefined && (
+        <div style={{ fontSize: '12px', lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary)', padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: '12px' }}>
+          <strong style={{ color: 'var(--dsw-alias-state-business-primary)' }}>{t('finding.suggestion')}:</strong> {finding.replacement || t('finding.delete')}
+        </div>
+      )}
+      {outcome !== null && (
+        <div role={outcome === 'decision-error' ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', fontSize: '12px', color: outcome === 'decision-error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)' }}>
+          {t(outcome === 'apply-skipped' ? 'operation.applySkipped' : 'operation.decisionFailed')}
+        </div>
+      )}
+    </div>
+  )
+}

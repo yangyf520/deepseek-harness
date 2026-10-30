@@ -1,1 +1,1 @@
-Waiting for sign inPage did not open automatically? Copy failed, then open it in your browser to finish signing in.Cancel
+Waiting for sign inWhen the link is ready, Open browser, or copy failed and finish signing in in your browser.Cancel

@@ -1,0 +1,43 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/audit/audit-review/README.md
+/:
+  en: 7baa431b753309cd
+  zh: f0576b8405a30bd3
+/deepseek-ai-dsh-audit-review:
+  en: 8131e3583a3d7350
+  zh: 8d4bd44994b3b90f
+/deepseek-ai-dsh-audit-review/summary:
+  en: 90e43787ca153246
+  zh: 574ea43888b0f808
+/deepseek-ai-dsh-audit-review/table-of-contents:
+  en: fe1ecb09a73d1c7a
+  zh: f27eb5ff139d70b4
+/deepseek-ai-dsh-audit-review/use-this-package:
+  en: ab92ec5d732ffc61
+  zh: 71293e95566e37dc
+/deepseek-ai-dsh-audit-review/understand-the-implementation:
+  en: e42b95a3cf0b8465
+  zh: ff80eb60d7b9bc95
+/deepseek-ai-dsh-audit-review/model-experience:
+  en: 215e7ba838619b7b
+  zh: 215e7ba838619b7b
+/deepseek-ai-dsh-audit-review/model-experience/review-requests:
+  en: da97c82eaf53747b
+  zh: da97c82eaf53747b
+/deepseek-ai-dsh-audit-review/model-experience/review-requests/what-the-model-sees:
+  en: dc8536b99ad5c3aa
+  zh: d558d1848e43bbb4
+/deepseek-ai-dsh-audit-review/model-experience/review-requests/token-effect:
+  en: aa26ef0c4f095fa4
+  zh: b437837c7c34f84f
+/deepseek-ai-dsh-audit-review/model-experience/review-requests/kv-cache-effect:
+  en: b17d4fbffa07310b
+  zh: 67848b41b7697b4a
+/deepseek-ai-dsh-audit-review/known-limitations-and-deferred-work:
+  en: 72bb8c02b19a336b
+  zh: 51a3ed0b5401e303
+/deepseek-ai-dsh-audit-review/known-limitations-and-deferred-work/dev-note:
+  en: 45ec51258109208a
+  zh: 7aeea62eda52b83b
