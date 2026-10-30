@@ -73,11 +73,11 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
     <div style={{
       padding: '12px',
       border: `1px solid ${DECISION_BORDER[decided ?? 'pending']}`,
-      borderRadius: 'var(--dsw-radius-xs)',
+      borderRadius: 'var(--dsw-radius-sm)',
       background: 'var(--dsw-alias-bg-base)',
       marginBottom: '8px',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px', paddingBottom: '8px', borderBottom: '0.5px solid var(--dsw-alias-border-l4)' }}>
         <span className={css.severityTag} style={{
           background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity],
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
