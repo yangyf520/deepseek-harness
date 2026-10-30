@@ -18,7 +18,7 @@ export const presentationHintsSchema = z.object({
     commenting: z.object({ enabled: z.boolean() }).optional(),
     tagging: z.object({ enabled: z.boolean(), allowedTags: z.array(z.string()).optional() }).optional(),
     deciding: z.object({ enabled: z.boolean(), actions: z.array(actions).optional() }).optional(),
-    exporting: z.object({ enabled: z.boolean(), formats: z.array(z.enum(['csv', 'json', 'html', 'markdown', 'modified-document'])) }).optional(),
+    exporting: z.object({ enabled: z.boolean(), formats: z.array(z.enum(['csv', 'json', 'html', 'markdown', 'pdf', 'modified-document'])) }).optional(),
     visualizing: z.object({ enabled: z.boolean(), type: z.enum(['chart', 'heatmap', 'matrix', 'timeline', 'distribution']).optional() }).optional(),
     comparing: z.object({ enabled: z.boolean() }).optional(),
     tracking: z.object({ enabled: z.boolean() }).optional(),
@@ -51,7 +51,7 @@ export function resolvePresentationHints(
     tagging: { enabled: true },
     tracking: { enabled: true },
     collaboration: { enabled: true },
-    exporting: { enabled: true, formats: ['csv', 'json', 'html', 'markdown'] },
+    exporting: { enabled: true, formats: ['csv', 'html', 'pdf'] },
     deciding: { enabled: findings.some(finding => finding.replacement !== undefined), actions: ['accept', 'reject', 'undo'] },
     ...(hints?.groupBy !== undefined ? { grouping: { enabled: true, groupBy: hints.groupBy } } : {}),
     ...(legacyScoring?.enabled === true ? { scoring: {

@@ -106,7 +106,7 @@ export interface CapabilityConfig {
   /** Export in various formats */
   readonly exporting?: {
     readonly enabled: boolean
-    readonly formats: ReadonlyArray<'csv' | 'json' | 'html' | 'markdown' | 'modified-document'>
+    readonly formats: ReadonlyArray<'csv' | 'json' | 'html' | 'markdown' | 'pdf' | 'modified-document'>
   }
   /** Visualize data with charts and graphs */
   readonly visualizing?: {

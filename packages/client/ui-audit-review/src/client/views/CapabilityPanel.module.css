@@ -1,22 +1,50 @@
 .panel {
-  padding: 10px 12px;
+  padding: 7px 12px;
   background: var(--dsw-alias-bg-base);
   border-bottom: 1px solid var(--dsw-alias-border-l4);
 }
 
-.details {
-  background: transparent;
-}
-
-.summary {
+.toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 0;
+  min-width: 0;
+}
+
+.toolbarExports {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.exportButton {
+  height: 24px;
+  padding: 0 7px;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-bg-base);
+}
+
+.moreButton {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  padding: 4px 6px;
   color: var(--dsw-alias-label-primary);
+  font: inherit;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  border: 0;
+  background: transparent;
   user-select: none;
 }
 
@@ -44,10 +72,6 @@
   font-weight: 400;
 }
 
-.collapseLabel {
-  display: none;
-}
-
 .chevron {
   width: 6px;
   height: 6px;
@@ -57,28 +81,17 @@
   transition: transform 120ms ease;
 }
 
-.details[open] .expandLabel {
-  display: none;
-}
-
-.details[open] .collapseLabel {
-  display: inline;
-}
-
-.details[open] .chevron {
+.chevronOpen {
   transform: rotate(225deg) translate(-1px, -1px);
-}
-
-.details[open] .summary {
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--dsw-alias-border-l4);
 }
 
 .content {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  margin-top: 8px;
   padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l4);
 }
 
 .group {

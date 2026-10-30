@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /** Shared capability controls cover business actions in every presentation. */
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { AuditState } from '@deepseek-ai/dsh-audit-review/types'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import { CapabilityPanel } from '../src/client/views/CapabilityPanel.tsx'
+import { CapabilityPanel, printableAuditHtml } from '../src/client/views/CapabilityPanel.tsx'
 import type { ViewProps } from '../src/client/views/types.ts'
 import { en } from '../src/client/locales.ts'
 
@@ -37,7 +37,10 @@ function props(overrides: Partial<ViewProps> = {}): ViewProps {
   } as ViewProps
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 it('runs score, comment, tag, tracking and export actions through one shared panel', async () => {
   const callbacks = props()
@@ -45,7 +48,7 @@ it('runs score, comment, tag, tracking and export actions through one shared pan
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
   render(<CapabilityPanel {...callbacks} />)
-  fireEvent.click(screen.getByText('More review actions'))
+  fireEvent.click(screen.getByText('More'))
 
   fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '4' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
@@ -53,19 +56,29 @@ it('runs score, comment, tag, tracking and export actions through one shared pan
   fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
   fireEvent.click(screen.getByLabelText('legal'))
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'in-progress' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Export JSON' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }))
 
   await waitFor(() => expect(callbacks.onRate).toHaveBeenCalledWith('f1', 3, 4))
   expect(callbacks.onComment).toHaveBeenCalledWith('f1', 3, 'Needs owner review')
   expect(callbacks.onTag).toHaveBeenCalledWith('f1', 3, ['legal'])
   expect(callbacks.onTrack).toHaveBeenCalledWith('f1', 3, expect.objectContaining({ status: 'in-progress' }))
-  expect(callbacks.onExportData).toHaveBeenCalledWith(3, 'json')
+  expect(callbacks.onExportData).toHaveBeenCalledWith(3, 'html')
+  expect(screen.queryByRole('button', { name: 'Export JSON' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Export MARKDOWN' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Export PDF' })).toBeTruthy()
   expect(createObjectURL).toHaveBeenCalled()
+})
+
+it('builds a printable PDF report without executable finding markup', () => {
+  const html = printableAuditHtml([{ id: 'f1', title: '<script>alert(1)</script>', anchor: { path: 'a.txt', line: 1, quote: 'x' }, issue: 'Review & approve' }])
+  expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  expect(html).toContain('Review &amp; approve')
+  expect(html).not.toContain('<script>alert(1)</script>')
 })
 
 it('keeps baseline workflow actions open while hiding a disabled scenario action', () => {
   render(<CapabilityPanel {...props({ state: { ...state, presentationHints: { capabilities: { commenting: { enabled: false } } } } })} />)
-  fireEvent.click(screen.getByText('More review actions'))
+  fireEvent.click(screen.getByText('More'))
   expect(screen.getByRole('region', { name: 'Business actions' })).toBeTruthy()
   expect(screen.queryByLabelText('Add comment')).toBeNull()
   expect(screen.getByLabelText('Status')).toBeTruthy()
@@ -75,10 +88,24 @@ it('keeps baseline workflow actions open while hiding a disabled scenario action
 
 it('shows a visible failure outcome', async () => {
   render(<CapabilityPanel {...props({ onRate: vi.fn().mockResolvedValue(false) })} />)
-  fireEvent.click(screen.getByText('More review actions'))
+  fireEvent.click(screen.getByText('More'))
   fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '2' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
   const status = await screen.findByRole('status')
   expect(status.textContent).toBe(en['operation.failed'])
-  expect(status.closest('summary')).not.toBeNull()
+  expect(status.closest('section')).not.toBeNull()
+})
+
+it('clears transient operation feedback', async () => {
+  vi.useFakeTimers()
+  render(<CapabilityPanel {...props()} />)
+  fireEvent.click(screen.getByText('More'))
+  fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '3' } })
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
+    await Promise.resolve()
+  })
+  expect(screen.getByRole('status').textContent).toBe(en['operation.saved'])
+  act(() => vi.advanceTimersByTime(2_500))
+  expect(screen.queryByRole('status')).toBeNull()
 })

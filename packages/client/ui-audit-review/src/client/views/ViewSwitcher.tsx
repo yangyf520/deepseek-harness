@@ -3,9 +3,9 @@
  * @module
  */
 
-import { Component, type ReactNode } from 'react'
+import { Component, type ReactNode, useState } from 'react'
 import type { AuditState } from '@deepseek-ai/dsh-audit-review/types'
-import type { ViewMode, ViewProps } from './types.ts'
+import type { FindingFilter, ViewMode, ViewProps } from './types.ts'
 import { SplitPanelView } from './SplitPanelView.tsx'
 import { GroupedListView } from './GroupedListView.tsx'
 import { MatrixView } from './MatrixView.tsx'
@@ -97,13 +97,14 @@ function chooseViewMode(state: AuditState): ViewMode {
  */
 export function ViewSwitcher(props: ViewProps) {
   const { state } = props
+  const [findingFilter, setFindingFilter] = useState<FindingFilter>('all')
   const viewMode = chooseViewMode(state)
 
   // Render the appropriate view based on viewMode, with split-panel as the safe fallback.
   let view: ReactNode
   switch (viewMode) {
     case 'split-panel':
-      view = <SplitPanelView {...props} />
+      view = <SplitPanelView {...props} filter={findingFilter} onFilterChange={setFindingFilter} />
       break
     case 'grouped-list':
       view = <GroupedListView {...props} />
@@ -122,7 +123,7 @@ export function ViewSwitcher(props: ViewProps) {
       break
     default:
       // Fallback to split-panel for any unexpected viewMode value.
-      view = <SplitPanelView {...props} />
+      view = <SplitPanelView {...props} filter={findingFilter} onFilterChange={setFindingFilter} />
   }
 
   return <ViewErrorBoundary failed={props.t('view.renderFailed')} retry={props.t('action.retry')}><CapabilityPanel {...props} />{view}</ViewErrorBoundary>

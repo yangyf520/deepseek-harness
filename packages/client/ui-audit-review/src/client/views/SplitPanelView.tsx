@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { renderAsync } from 'docx-preview'
 import { FindingCard } from './FindingCard.tsx'
-import type { ViewProps } from './types.ts'
+import type { FindingFilter, ViewProps } from './types.ts'
 import { isCodePath, orderFindings, parseIssue } from '../AuditCard.tsx'
 import { scenarioMetadataOf } from './CapabilityBadges.tsx'
 import { alignToCard, applyAccepted, clearOutlines, highlightQuote, outlineApplied, unwrapHighlights } from './documentHighlight.ts'
@@ -78,7 +78,7 @@ export function prepareDocumentHtml(source: string): string {
 /**
  * Split-panel view component.
  */
-export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, onApply }: ViewProps) {
+export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, onApply, filter = 'all', onFilterChange }: Pick<ViewProps, 'state' | 'sessionId' | 'readFileBytes' | 't' | 'onDecide' | 'onApply'> & { filter?: FindingFilter; onFilterChange?: (filter: FindingFilter) => void }) {
   const [docHtml, setDocHtml] = useState<string>('')
   const [docError, setDocError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -178,45 +178,52 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
   const codeReview = isCodePath(anchorPath)
   const accepted = Object.entries(state.decisions).filter(([, d]) => d === 'accept').length
   const rejected = Object.entries(state.decisions).filter(([, d]) => d === 'reject').length
-  const resolved = Object.values(metadata.workflow ?? {}).filter(item => item.status === 'resolved').length
+  const decided = accepted + rejected
+  const visibleFindings = findings.filter((finding) => {
+    const decision = state.decisions[finding.id]
+    if (filter === 'pending') return decision === undefined
+    if (filter === 'accepted') return decision === 'accept'
+    if (filter === 'rejected') return decision === 'reject'
+    return true
+  })
+  const findingIndices = new Map(findings.map((finding, index) => [finding.id, index]))
+  const filters = [
+    ['all', t('label.all'), findings.length],
+    ['pending', t('status.pending'), Math.max(findings.length - accepted - rejected, 0)],
+    ['accepted', t('status.accepted'), accepted],
+    ['rejected', t('status.rejected'), rejected],
+  ] as const
 
   return (
     <div className={css.root}>
       {/* Left: Findings list */}
-      <div ref={listRef} className={css.findings}>
-        <div
-          className={css.findingsHeader}
-          onClick={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-        >
-          <div className={css.findingsTitle}>
-            {codeReview ? t('overview.codeTitle') : (state.cardTitle ?? t('overview.title'))} ({findings.length})
-          </div>
-          <div className={css.findingsSummary}>
-            {state.summary !== undefined && <>{state.summary} · </>}
-            <span className={css.acceptedCount}>{accepted} {t('status.accepted')}</span>
-            {' · '}
-            <span className={css.resolvedCount}>{resolved} {t('workflow.resolved')}</span>
-            {' · '}
-            <span className={css.rejectedCount}>{rejected} {t('status.rejected')}</span>
+      <div className={css.findings}>
+        <div className={css.findingsHeader}>
+          <div className={css.headerOverview} onDoubleClick={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}>
+            <div className={css.titleGroup}>
+              <div className={css.findingsTitle}>{codeReview ? t('overview.codeTitle') : (state.cardTitle ?? t('overview.title'))}</div>
+              <span className={css.findingsSummary}>{decided}/{findings.length}</span>
+            </div>
+            <div className={css.headerActions}>
+              {onFilterChange !== undefined && <div className={css.filters}>
+                {filters.map(([value, label, count]) => <button key={value} type="button" className={filter === value ? css.filterActive : css.filterButton} aria-pressed={filter === value} onClick={(event) => { event.stopPropagation(); onFilterChange(value) }}>{label}<span>{count}</span></button>)}
+              </div>}
+            </div>
           </div>
         </div>
-        <div style={{ display: 'grid', gap: '16px', padding: '16px' }}>
-          {findings.map((finding, index) => (
+        <div ref={listRef} className={css.findingsList}>
+          {visibleFindings.map(finding => (
             <div
               key={`${state.round}:${finding.id}`}
               data-finding-id={finding.id}
               ref={selectedId === finding.id ? cardRef : undefined}
               onClick={() => setSelectedId(finding.id)}
-              style={{
-                cursor: 'pointer',
-                outline: selectedId === finding.id ? '2px solid var(--dsw-alias-state-business-primary)' : 'none',
-                borderRadius: 'var(--dsw-radius-sm)',
-              }}
+              className={`${css.findingItem} ${selectedId === finding.id ? css.findingSelected : ''} ${state.decisions[finding.id] !== undefined ? css.findingDecided : ''}`}
             >
               <FindingCard
                 finding={finding}
                 documentPath={state.documentPath}
-                index={index}
+                index={findingIndices.get(finding.id) ?? 0}
                 round={state.round}
                 t={t}
                 onDecide={onDecide}
