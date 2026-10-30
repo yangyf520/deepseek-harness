@@ -15,6 +15,18 @@ export type { AuditFinding, AuditState }
 /** Severity level for color coding. */
 export type Severity = 'high' | 'medium' | 'low'
 
+const CODE_PATH_PRIMARY = /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|swift|rb|php|cs)$/i
+const CODE_PATH_SECONDARY = /\.(?:cpp|cc|cxx|h|hpp|vue|svelte|sql|sh|ya?ml|json|toml)$/i
+
+/**
+ * Whether a review anchor names source code or a code-adjacent text format.
+ * @param path - Review anchor path.
+ * @returns Whether the path should use the code review presentation.
+ */
+export function isCodePath(path: string): boolean {
+  return CODE_PATH_PRIMARY.test(path) || CODE_PATH_SECONDARY.test(path)
+}
+
 /** Color map for severity badges. */
 export const SEVERITY_COLOR: Record<Severity, string> = {
   high: '#b91c1c',

@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState } from 'react'
 import type { AuditDecision, AuditFinding, AuditState } from '@deepseek-ai/dsh-audit-review/types'
 import type { ViewProps } from './types.ts'
-import { parseIssue, findingSummary, SEVERITY_BG, SEVERITY_COLOR } from '../AuditCard.tsx'
+import { parseIssue, findingSummary, isCodePath, SEVERITY_BG, SEVERITY_COLOR } from '../AuditCard.tsx'
 import { splitBasis } from '../regulation.ts'
 import { RatingBadge, TagChips } from './CapabilityBadges.tsx'
 
@@ -39,6 +39,7 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
   const severity = parsed.severity
   const severityLabel = severityLabels?.[severity] ?? t(`severity.${severity}`)
   const summary = findingSummary(finding)
+  const codeFinding = isCodePath(finding.anchor.path)
 
   const decide = async (decision: AuditDecision): Promise<void> => {
     if (inFlight.current) return
@@ -117,7 +118,9 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
         </>}
       </div>
       <div style={{ fontSize: '13px', marginBottom: '8px', lineHeight: 1.4, padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', borderRadius: 'var(--dsw-radius-sm)', color: 'var(--dsw-alias-label-primary)' }}>
+        {codeFinding && <div style={{ marginBottom: '6px', color: 'var(--dsw-alias-label-tertiary)', font: '11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>{finding.anchor.path}:{finding.anchor.line}</div>}
         {prose}
+        {codeFinding && <pre style={{ margin: '8px 0 0', padding: '8px', overflowX: 'auto', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-sm)', whiteSpace: 'pre-wrap', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-base)', font: '11px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}><code>{finding.anchor.quote}</code></pre>}
       </div>
       {finding.replacement !== undefined && (
         <div style={{ fontSize: '12px', lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary)', padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-sm)' }}>

@@ -4,6 +4,7 @@
 export const zh = {
   'tab.title': '审计审查',
   'overview.title': '发现列表',
+  'overview.codeTitle': '代码审查结果',
   'overview.findings': '条发现',
   'overview.more': '更多发现',
   'overview.openReview': '查看详情',
@@ -90,6 +91,7 @@ export type AuditKey = keyof typeof zh
 export const en = {
   'tab.title': 'Audit Review',
   'overview.title': 'Findings',
+  'overview.codeTitle': 'Code review results',
   'overview.findings': 'findings',
   'overview.more': 'more findings',
   'overview.openReview': 'View Details',

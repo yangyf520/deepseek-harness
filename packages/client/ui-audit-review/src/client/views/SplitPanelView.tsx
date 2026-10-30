@@ -5,9 +5,10 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { renderAsync } from 'docx-preview'
 import { FindingCard } from './FindingCard.tsx'
 import type { ViewProps } from './types.ts'
-import { orderFindings, parseIssue } from '../AuditCard.tsx'
+import { isCodePath, orderFindings, parseIssue } from '../AuditCard.tsx'
 import { scenarioMetadataOf } from './CapabilityBadges.tsx'
 import { alignToCard, applyAccepted, clearOutlines, highlightQuote, outlineApplied, unwrapHighlights } from './documentHighlight.ts'
 import css from './SplitPanelView.module.css'
@@ -25,7 +26,8 @@ const DOCUMENT_STYLES = `
     --_audit-border: var(--dsw-alias-border-l4, #d0d0d0);
     --_audit-th-bg: var(--dsw-alias-bg-base, #f5f5f5);
   }
-  [data-audit-document], [data-audit-document] div { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: var(--_audit-text); background: var(--_audit-bg); }
+  [data-audit-document] { box-sizing: border-box; max-width: 900px; min-height: calc(100% - 24px); margin: 12px auto; padding: 36px 48px; border: 1px solid var(--_audit-border); border-radius: var(--dsw-radius-sm); color: var(--_audit-text); background: var(--_audit-bg); box-shadow: 0 2px 12px color-mix(in srgb, var(--_audit-text) 8%, transparent); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.65; }
+  [data-audit-document] * { box-sizing: border-box; }
   [data-audit-document] h1 { font-size: 1.8em; font-weight: 700; margin: 0.8em 0 0.4em; }
   [data-audit-document] h2 { font-size: 1.4em; font-weight: 600; margin: 0.6em 0 0.3em; }
   [data-audit-document] h3 { font-size: 1.2em; font-weight: 600; margin: 0.5em 0 0.2em; }
@@ -36,8 +38,21 @@ const DOCUMENT_STYLES = `
   [data-audit-document] ul, [data-audit-document] ol { margin: 0.4em 0; padding-left: 1.5em; }
   [data-audit-document] li { margin: 0.2em 0; }
   [data-audit-document] mark { padding: 1px 2px; border-radius: 2px; }
+  [data-audit-document] .audit-code-path { margin: -12px 0 18px; padding-bottom: 10px; border-bottom: 1px solid var(--_audit-border); color: var(--_audit-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+  [data-audit-document] pre[data-audit-code] { margin: 0; overflow: visible; white-space: pre; tab-size: 2; color: var(--_audit-text); background: transparent; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 </style>
 `
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function textPreview(path: string, text: string): string {
+  if (isCodePath(path)) {
+    return `${DOCUMENT_STYLES}<div class="audit-code-path">${escapeHtml(path)}</div><pre data-audit-code><code>${escapeHtml(text)}</code></pre>`
+  }
+  return `${DOCUMENT_STYLES}<pre style="margin:0;white-space:pre-wrap;font:inherit">${escapeHtml(text)}</pre>`
+}
 
 /**
  * Keep converted document markup inside the preview instead of letting its head content alter the application.
@@ -70,16 +85,35 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
 
   const selectedFinding = selectedId !== null ? state.findings.find(f => f.id === selectedId) ?? null : null
   const anchorPath = selectedFinding?.anchor.path ?? state.findings[0]?.anchor.path ?? state.documentPath
+  const previewPath = /\.docx$/i.test(state.documentPath) ? state.documentPath : anchorPath
   const htmlPath = anchorPath?.replace(/\.[^.]+$/, '.html') ?? null
 
   // Load document HTML
   useEffect(() => {
-    if (!anchorPath) return
+    if (!previewPath) return
     setDocHtml('')
     setDocError(null)
 
     const failLoad = (error: unknown): void => {
       setDocError(error instanceof Error ? error.message : String(error))
+    }
+
+    if (/\.docx$/i.test(previewPath)) {
+      readFileBytes(sessionId, previewPath)
+        .then(async (bytes) => {
+          const staging = document.createElement('div')
+          await renderAsync(bytes, staging, staging, {
+            breakPages: true,
+            ignoreHeight: false,
+            ignoreWidth: false,
+            inWrapper: true,
+            renderHeaders: true,
+            renderFooters: true,
+          })
+          setDocHtml(DOCUMENT_STYLES + staging.innerHTML)
+        })
+        .catch(failLoad)
+      return
     }
 
     if (htmlPath === null || htmlPath === anchorPath) {
@@ -90,7 +124,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
       readFileBytes(sessionId, anchorPath)
         .then((bytes) => {
           const text = new TextDecoder().decode(bytes)
-          setDocHtml(/\.html?$/i.test(anchorPath) ? DOCUMENT_STYLES + text : `<pre style="white-space: pre-wrap;">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`)
+          setDocHtml(/\.html?$/i.test(anchorPath) ? prepareDocumentHtml(text) : textPreview(anchorPath, text))
         })
         .catch(failLoad)
       return
@@ -106,11 +140,11 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
         readFileBytes(sessionId, anchorPath)
           .then((bytes) => {
             const text = new TextDecoder().decode(bytes)
-            setDocHtml(`<pre style="white-space: pre-wrap;">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`)
+            setDocHtml(textPreview(anchorPath, text))
           })
           .catch(failLoad)
       })
-  }, [sessionId, anchorPath, htmlPath, readFileBytes])
+  }, [sessionId, anchorPath, previewPath, htmlPath, readFileBytes])
 
   // Show accepted replacements and the selected quote in the document, then align the
   // located text with the card that asked for it.
@@ -136,6 +170,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
   }, [selectedId, state.findings, state.decisions, docHtml])
 
   const findings = orderFindings(state.findings)
+  const codeReview = isCodePath(anchorPath)
   const accepted = Object.entries(state.decisions).filter(([, d]) => d === 'accept').length
   const rejected = Object.entries(state.decisions).filter(([, d]) => d === 'reject').length
 
@@ -148,7 +183,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
           onClick={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
         >
           <div className={css.findingsTitle}>
-            {state.cardTitle ?? t('overview.title')} ({findings.length})
+            {codeReview ? t('overview.codeTitle') : (state.cardTitle ?? t('overview.title'))} ({findings.length})
           </div>
           <div className={css.findingsSummary}>
             {state.summary ?? <>{accepted} {t('status.accepted')} · {rejected} {t('status.rejected')}</>}

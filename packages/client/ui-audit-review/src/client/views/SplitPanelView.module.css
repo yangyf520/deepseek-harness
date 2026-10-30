@@ -48,6 +48,7 @@
 
 .document {
   padding: 0 16px 16px;
+  background: var(--dsw-alias-fill-secondary);
 }
 
 @media (max-width: 720px) {
