@@ -1,0 +1,13 @@
+.severityTag {
+  box-sizing: border-box;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  corner-shape: round;
+  line-height: 18px;
+}
+
+.severityIndex {
+  border-radius: 50%;
+  corner-shape: round;
+}

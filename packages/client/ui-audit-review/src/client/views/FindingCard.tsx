@@ -5,6 +5,7 @@ import type { ViewProps } from './types.ts'
 import { parseIssue, findingSummary, isCodePath, SEVERITY_BG, SEVERITY_COLOR } from '../AuditCard.tsx'
 import { splitBasis } from '../regulation.ts'
 import { RatingBadge, TagChips } from './CapabilityBadges.tsx'
+import css from './ReviewPresentation.module.css'
 
 /** Header border color per decision. */
 const DECISION_BORDER: Record<'accept' | 'reject' | 'pending', string> = {
@@ -72,22 +73,21 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
     <div style={{
       padding: '12px',
       border: `1px solid ${DECISION_BORDER[decided ?? 'pending']}`,
-      borderRadius: 'var(--dsw-radius-sm)',
+      borderRadius: 'var(--dsw-radius-xs)',
       background: 'var(--dsw-alias-bg-base)',
       marginBottom: '8px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-        <span style={{
+        <span className={css.severityTag} style={{
           background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity],
-          borderRadius: '13px', height: '26px', overflow: 'hidden',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-          padding: '0 10px 0 4px', fontSize: '10px', fontWeight: 500, flexShrink: 0,
+          padding: '0 7px 0 3px', fontSize: '10px', fontWeight: 500, flexShrink: 0,
         }}>
-          <span style={{
-            width: '14px', height: '14px', borderRadius: '50%',
+          <span className={css.severityIndex} style={{
+            width: '12px', height: '12px',
             background: SEVERITY_COLOR[severity], color: 'white',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '9px', fontWeight: 500, flexShrink: 0,
+            fontSize: '8px', fontWeight: 500, flexShrink: 0,
           }}>{index + 1}</span>
           {severityLabel}
         </span>
@@ -117,13 +117,13 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
           }}>{t('action.undo')}</button>
         </>}
       </div>
-      <div style={{ fontSize: '13px', marginBottom: '8px', lineHeight: 1.4, padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', borderRadius: 'var(--dsw-radius-sm)', color: 'var(--dsw-alias-label-primary)' }}>
+      <div style={{ fontSize: '13px', marginBottom: '8px', lineHeight: 1.4, padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', borderRadius: 'var(--dsw-radius-xs)', color: 'var(--dsw-alias-label-primary)' }}>
         {codeFinding && <div style={{ marginBottom: '6px', color: 'var(--dsw-alias-label-tertiary)', font: '11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>{finding.anchor.path}:{finding.anchor.line}</div>}
         {prose}
-        {codeFinding && <pre style={{ margin: '8px 0 0', padding: '8px', overflowX: 'auto', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-sm)', whiteSpace: 'pre-wrap', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-base)', font: '11px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}><code>{finding.anchor.quote}</code></pre>}
+        {codeFinding && <pre style={{ margin: '8px 0 0', padding: '8px', overflowX: 'auto', border: '0.5px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-xs)', whiteSpace: 'pre-wrap', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-base)', font: '11px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}><code>{finding.anchor.quote}</code></pre>}
       </div>
       {finding.replacement !== undefined && (
-        <div style={{ fontSize: '12px', lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary)', padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-sm)' }}>
+        <div style={{ fontSize: '12px', lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary)', padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', border: '0.5px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-sm)' }}>
           <strong style={{ color: 'var(--dsw-alias-state-business-primary)' }}>{t('finding.suggestion')}:</strong> {finding.replacement || t('finding.delete')}
         </div>
       )}

@@ -10,6 +10,7 @@ import type { AuditFinding } from '@deepseek-ai/dsh-audit-review/types'
 import { parseIssue, SEVERITY_COLOR } from '../AuditCard.tsx'
 import { findingSummary } from '../AuditCard.tsx'
 import { RatingBadge, TagChips, scenarioMetadataOf } from './CapabilityBadges.tsx'
+import css from './ReviewPresentation.module.css'
 
 /**
  * Matrix view component: rows are findings, columns are metadata fields or scoring dimensions.
@@ -29,9 +30,9 @@ export function MatrixView({ state, t }: ViewProps) {
       render: (finding) => {
         const severity = parseIssue(finding.issue).severity
         return (
-          <span style={{
+          <span className={css.severityTag} style={{
             background: SEVERITY_COLOR[severity], color: 'white',
-            borderRadius: '10px', height: '20px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', padding: '2px 8px', fontSize: '11px', fontWeight: 600,
+            display: 'inline-flex', alignItems: 'center', padding: '0 8px', fontSize: '10px', fontWeight: 500,
           }}>
             {t(`severity.${severity}`)}
           </span>

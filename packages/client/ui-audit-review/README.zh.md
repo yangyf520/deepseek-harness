@@ -26,7 +26,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节</summary>
 
-[ViewSwitcher](src/client/views/ViewSwitcher.tsx)选择布局。分栏和文档比较布局复用 [FindingCard](src/client/views/FindingCard.tsx) 展示证据并处理决定。卡片在操作期间阻止重复点击，区分决定保存失败和文件应用失败，不会应用没有替换建议的发现。Remote 回调同时检查传输和业务结果。
+[ViewSwitcher](src/client/views/ViewSwitcher.tsx)选择布局。分栏和文档比较布局复用 [FindingCard](src/client/views/FindingCard.tsx) 展示证据并处理决定。分栏视图在预览区域中按文档尺寸渲染 DOCX 页面，各审查布局使用紧凑的严重程度半圆标签。卡片在操作期间阻止重复点击，区分决定保存失败和文件应用失败，不会应用没有替换建议的发现。Remote 回调同时检查传输和业务结果。
 
 新增布局负责排列，将现有发现和操作属性传给共享组件，不重复实现 Remote 调用或决定处理。共享操作文字归属语言字典。
 

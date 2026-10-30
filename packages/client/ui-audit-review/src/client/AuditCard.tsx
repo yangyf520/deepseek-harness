@@ -8,6 +8,7 @@ import type { AuditExportResult, AuditFinding, AuditState } from '@deepseek-ai/d
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ReadFileBytes } from './ReviewPanel.tsx'
 import { splitBasis } from './regulation.ts'
+import css from './views/ReviewPresentation.module.css'
 
 // The projection state and its findings are the Host types, so a card and the Host fold never drift.
 export type { AuditFinding, AuditState }
@@ -169,14 +170,14 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
           <div key={finding.id} style={{
             display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', cursor: 'pointer',
           }}>
-            <span style={{
+            <span className={css.severityTag} style={{
               minWidth: '20px', textAlign: 'center',
               background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
-              borderRadius: '10px', height: '20px', boxSizing: 'border-box', fontSize: '10px', padding: '1px 6px', fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', padding: '0 6px', fontWeight: 500,
             }}>{i + 1}</span>
-            <span style={{
+            <span className={css.severityTag} style={{
               background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
-              borderRadius: '10px', height: '20px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', fontSize: '10px', padding: '0 6px',
+              display: 'inline-flex', alignItems: 'center', fontSize: '10px', padding: '0 6px',
             }}>{t(`severity.${severity}`)}</span>
             <span style={{
               flex: '1 1 0%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

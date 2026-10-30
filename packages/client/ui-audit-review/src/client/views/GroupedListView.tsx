@@ -10,6 +10,7 @@ import type { AuditFinding, AuditState } from '@deepseek-ai/dsh-audit-review/typ
 import { orderFindings, parseIssue, SEVERITY_BG, SEVERITY_COLOR } from '../AuditCard.tsx'
 import { findingSummary } from '../AuditCard.tsx'
 import { RatingBadge, TagChips, scenarioMetadataOf } from './CapabilityBadges.tsx'
+import css from './ReviewPresentation.module.css'
 
 /**
  * Grouped-list view component.
@@ -74,9 +75,9 @@ export function GroupedListView({ state, t }: ViewProps) {
                     borderRadius: '8px', background: 'var(--dsw-alias-bg-base)',
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                      <span style={{
+                      <span className={css.severityTag} style={{
                         background: SEVERITY_COLOR[severity], color: 'white',
-                        borderRadius: '10px', height: '20px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
+                        display: 'inline-flex', alignItems: 'center', padding: '0 8px', fontSize: '10px', fontWeight: 500,
                       }}>
                         {severityLabels(state.severityLabels, severity, t)}
                       </span>

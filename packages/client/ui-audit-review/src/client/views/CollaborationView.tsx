@@ -9,6 +9,7 @@ import type { ViewProps } from './types.ts'
 import { parseIssue, SEVERITY_COLOR, SEVERITY_BG } from '../AuditCard.tsx'
 import { findingSummary } from '../AuditCard.tsx'
 import { RatingBadge, TagChips, scenarioMetadataOf } from './CapabilityBadges.tsx'
+import css from './ReviewPresentation.module.css'
 
 /**
  * Collaboration view component: findings with comment threads and decision status.
@@ -62,9 +63,9 @@ export function CollaborationView({ state, t }: ViewProps) {
               padding: '12px', borderBottom: comments.length > 0 ? '1px solid var(--dsw-alias-border-l4, rgb(234, 236, 240))' : 'none',
               display: 'flex', alignItems: 'center', gap: '8px',
             }}>
-              <span style={{
+              <span className={css.severityTag} style={{
                 background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity],
-                borderRadius: '10px', height: '20px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', padding: '0 8px', fontSize: '10px', fontWeight: 500,
               }}>
                 {t(`severity.${severity}`)}
               </span>

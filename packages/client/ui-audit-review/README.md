@@ -26,7 +26,7 @@ Mount this client plugin with [audit-review](../../audit/audit-review/README.md)
 <details>
 <summary>Implementation internals</summary>
 
-[ViewSwitcher](src/client/views/ViewSwitcher.tsx) selects a layout. Split-panel and document-comparison layouts reuse [FindingCard](src/client/views/FindingCard.tsx) for evidence and decision handling. The card blocks duplicate clicks while an operation is pending, distinguishes decision failure from file-application failure, and never applies a finding without a replacement. Remote callbacks check both transport and business outcomes.
+[ViewSwitcher](src/client/views/ViewSwitcher.tsx) selects a layout. Split-panel and document-comparison layouts reuse [FindingCard](src/client/views/FindingCard.tsx) for evidence and decision handling. The split panel renders DOCX pages with their document dimensions inside the preview surface and uses compact severity capsules across review layouts. The card blocks duplicate clicks while an operation is pending, distinguishes decision failure from file-application failure, and never applies a finding without a replacement. Remote callbacks check both transport and business outcomes.
 
 A new layout supplies positioning and passes the existing finding and operation props to shared components. It does not duplicate Remote calls or decision handling. Shared operation labels belong to the locale dictionary.
 

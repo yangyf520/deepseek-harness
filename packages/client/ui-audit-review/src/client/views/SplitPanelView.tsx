@@ -26,7 +26,12 @@ const DOCUMENT_STYLES = `
     --_audit-border: var(--dsw-alias-border-l4, #d0d0d0);
     --_audit-th-bg: var(--dsw-alias-bg-base, #f5f5f5);
   }
-  [data-audit-document] { box-sizing: border-box; max-width: 900px; min-height: calc(100% - 24px); margin: 12px auto; padding: 36px 48px; border: 1px solid var(--_audit-border); border-radius: var(--dsw-radius-sm); color: var(--_audit-text); background: var(--_audit-bg); box-shadow: 0 2px 12px color-mix(in srgb, var(--_audit-text) 8%, transparent); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.65; }
+  [data-audit-document] { box-sizing: border-box; color: var(--_audit-text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.65; }
+  [data-audit-document][data-document-kind='html'] { max-width: 900px; min-height: calc(100% - 24px); margin: 12px auto; padding: 36px 48px; border: 0.5px solid var(--_audit-border); border-radius: var(--dsw-radius-xs); background: var(--_audit-bg); box-shadow: 0 2px 12px color-mix(in srgb, var(--_audit-text) 8%, transparent); }
+  [data-audit-document][data-document-kind='docx'] { width: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  [data-audit-document][data-document-kind='docx'] .docx-wrapper { min-height: 100%; padding: 12px 0; overflow: visible; background: transparent; }
+  [data-audit-document][data-document-kind='docx'] .docx { max-width: calc(100% - 24px); margin: 0 auto 12px; border: 0.5px solid var(--_audit-border); box-shadow: 0 2px 12px color-mix(in srgb, var(--_audit-text) 8%, transparent); }
+  [data-audit-document][data-document-kind='docx'] .docx > article { padding-right: 24px; padding-left: 24px; }
   [data-audit-document] * { box-sizing: border-box; }
   [data-audit-document] h1 { font-size: 1.8em; font-weight: 700; margin: 0.8em 0 0.4em; }
   [data-audit-document] h2 { font-size: 1.4em; font-weight: 600; margin: 0.6em 0 0.3em; }
@@ -199,7 +204,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
               style={{
                 cursor: 'pointer',
                 outline: selectedId === finding.id ? '2px solid var(--dsw-alias-state-business-primary)' : 'none',
-                borderRadius: '12px',
+                borderRadius: 'var(--dsw-radius-xs)',
                 marginBottom: '12px',
               }}
             >
@@ -223,7 +228,12 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
       {/* Right: Document preview */}
       <div ref={scrollRef} className={css.document}>
         {docHtml ? (
-          <div ref={docTextRef} data-audit-document dangerouslySetInnerHTML={{ __html: docHtml }} />
+          <div
+            ref={docTextRef}
+            data-audit-document
+            data-document-kind={/\.docx$/i.test(previewPath) ? 'docx' : 'html'}
+            dangerouslySetInnerHTML={{ __html: docHtml }}
+          />
         ) : docError !== null ? (
           <div style={{ color: 'var(--dsw-alias-state-error-primary)', padding: '20px' }}>{docError}</div>
         ) : (
