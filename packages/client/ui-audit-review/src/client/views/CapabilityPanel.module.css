@@ -22,6 +22,7 @@
 
 .success,
 .error {
+  margin-left: auto;
   font-size: 12px;
   font-weight: 400;
 }
@@ -38,7 +39,6 @@
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  margin-left: auto;
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   font-weight: 400;
