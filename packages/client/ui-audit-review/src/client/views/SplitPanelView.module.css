@@ -48,6 +48,18 @@
   text-align: right;
 }
 
+.acceptedCount {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.resolvedCount {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.rejectedCount {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .document {
   padding: 0 16px 16px;
   background: var(--dsw-alias-fill-secondary);

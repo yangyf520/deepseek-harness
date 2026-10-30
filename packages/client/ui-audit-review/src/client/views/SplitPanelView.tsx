@@ -193,7 +193,11 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
           </div>
           <div className={css.findingsSummary}>
             {state.summary !== undefined && <>{state.summary} · </>}
-            {accepted} {t('status.accepted')} · {resolved} {t('workflow.resolved')} · {rejected} {t('status.rejected')}
+            <span className={css.acceptedCount}>{accepted} {t('status.accepted')}</span>
+            {' · '}
+            <span className={css.resolvedCount}>{resolved} {t('workflow.resolved')}</span>
+            {' · '}
+            <span className={css.rejectedCount}>{rejected} {t('status.rejected')}</span>
           </div>
         </div>
         <div style={{ padding: '16px' }}>
