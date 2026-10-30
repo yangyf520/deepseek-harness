@@ -9,16 +9,18 @@ import type { ViewProps } from './types.ts'
 import type { AuditFinding, AuditState } from '@deepseek-ai/dsh-audit-review/types'
 import { orderFindings, parseIssue, SEVERITY_BG, SEVERITY_COLOR } from '../AuditCard.tsx'
 import { findingSummary } from '../AuditCard.tsx'
-import { RatingBadge, TagChips, scenarioMetadataOf } from './CapabilityBadges.tsx'
-import css from './ReviewPresentation.module.css'
+import { TagChips, scenarioMetadataOf } from './CapabilityBadges.tsx'
+import { FindingCard } from './FindingCard.tsx'
+import css from './GroupedListView.module.css'
 
 /**
  * Grouped-list view component.
  */
-export function GroupedListView({ state, t }: ViewProps) {
+export function GroupedListView({ state, t, onDecide, onApply, onEditReplacement }: ViewProps) {
   const groupBy = state.presentationHints?.capabilities?.grouping?.groupBy ?? state.presentationHints?.groupBy
   const findings = orderFindings(state.findings)
   const metadata = scenarioMetadataOf(state)
+  const findingIndices = new Map(findings.map((finding, index) => [finding.id, index]))
 
   // Model-authored grouping (Remote `group`) takes precedence; fall back to title-prefix inference.
   const groups = useMemo(() => {
@@ -41,65 +43,48 @@ export function GroupedListView({ state, t }: ViewProps) {
   }, [findings, groupBy, metadata, t])
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', height: '100%', overflow: 'auto' }}>
+    <div className={css.root}>
       {/* Left: Grouped findings */}
-      <div style={{ flex: '1 1 360px', minWidth: 0, overflow: 'auto', background: 'var(--dsw-alias-fill-secondary)', borderRight: '1px solid var(--dsw-alias-border-l4)' }}>
-        <div style={{
-          position: 'sticky', top: 0, zIndex: 1,
-          padding: '16px',
-          background: 'var(--dsw-alias-fill-secondary)', borderBottom: '1px solid var(--dsw-alias-border-l4)',
-        }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>
+      <div className={css.findingsPane}>
+        <div className={css.header}>
+          <div className={css.title}>
             {state.cardTitle ?? t('overview.title')}
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }}>
+          <div className={css.subtitle}>
             {groups.length} {t('count.groups')} · {findings.length} {t('overview.findings')}
           </div>
         </div>
-        <div style={{ padding: '16px' }}>
+        <div className={css.groups}>
           {groups.map(group => (
-            <div key={group.key} style={{ marginBottom: '24px' }}>
-              <div style={{
-                fontSize: '13px', fontWeight: 600, marginBottom: '12px',
-                color: 'var(--dsw-alias-label-primary, rgb(30, 35, 45))',
-                paddingBottom: '8px', borderBottom: '2px solid var(--dsw-alias-state-business-primary, rgb(23, 92, 211))',
-              }}>
+            <section key={group.key} className={css.group}>
+              <h2 className={css.groupTitle}>
                 {group.label} ({group.findings.length})
-              </div>
-              {group.findings.map((finding) => {
-                const severity = parseIssue(finding.issue).severity
-                return (
-                  <div key={finding.id} style={{
-                    padding: '10px', marginBottom: '8px',
-                    border: '1px solid var(--dsw-alias-border-l4, rgb(234, 236, 240))',
-                    borderRadius: '8px', background: 'var(--dsw-alias-bg-base)',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                      <span className={css.severityTag} style={{
-                        background: SEVERITY_COLOR[severity], color: 'white',
-                        display: 'inline-flex', alignItems: 'center', padding: '0 8px', fontSize: '10px', fontWeight: 500,
-                      }}>
-                        {severityLabels(state.severityLabels, severity, t)}
-                      </span>
-                      <span style={{ flex: '1', fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>
-                        {findingSummary(finding)}
-                      </span>
-                      <RatingBadge rating={metadata.ratings?.[finding.id]} />
-                      <TagChips tags={metadata.tags?.[finding.id]} />
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-secondary, rgb(102, 112, 133))', lineHeight: 1.5 }}>
-                      {parseIssue(finding.issue).text}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+              </h2>
+              <div className={css.groupCards}>{group.findings.map(finding => (
+                <FindingCard
+                  key={`${state.round}:${finding.id}`}
+                  finding={finding}
+                  documentPath={state.documentPath}
+                  index={findingIndices.get(finding.id) ?? 0}
+                  round={state.round}
+                  t={t}
+                  onDecide={onDecide}
+                  onApply={onApply}
+                  onEditReplacement={onEditReplacement}
+                  decided={state.decisions[finding.id]}
+                  severityLabels={state.severityLabels}
+                  rating={metadata.ratings?.[finding.id]}
+                  tags={metadata.tags?.[finding.id]}
+                  editedReplacement={metadata.replacements?.[finding.id]}
+                />
+              ))}</div>
+            </section>
           ))}
         </div>
       </div>
 
       {/* Right: Summary visualization */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
+      <div className={css.summaryPane}>
         <SummaryVisualization groups={groups} state={state} t={t} />
       </div>
     </div>

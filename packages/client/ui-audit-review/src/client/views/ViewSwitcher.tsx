@@ -10,7 +10,6 @@ import { SplitPanelView } from './SplitPanelView.tsx'
 import { GroupedListView } from './GroupedListView.tsx'
 import { MatrixView } from './MatrixView.tsx'
 import { TimelineView } from './TimelineView.tsx'
-import { CollaborationView } from './CollaborationView.tsx'
 import { DiffView } from './DiffView.tsx'
 
 /**
@@ -63,32 +62,32 @@ class ViewErrorBoundary extends Component<
 /**
  * Determine the best view mode from presentation hints and data characteristics.
  */
-function chooseViewMode(state: AuditState): ViewMode {
-  // Explicit hint from model
-  if (state.presentationHints?.layout) {
-    return state.presentationHints.layout
+export function chooseViewMode(state: AuditState): ViewMode {
+  const hints = state.presentationHints
+  const capabilities = hints?.capabilities
+  const uniquePaths = new Set(state.findings.map(finding => finding.anchor.path))
+
+  switch (hints?.layout) {
+    case 'diff-view':
+      return uniquePaths.size > 1 ? 'diff-view' : 'split-panel'
+    case 'grouped-list':
+      return capabilities?.grouping?.enabled === true || hints.groupBy !== undefined
+        ? 'grouped-list'
+        : 'split-panel'
+    case 'matrix':
+      return capabilities?.scoring?.enabled === true || capabilities?.comparing?.enabled === true
+        ? 'matrix'
+        : 'split-panel'
+    case 'timeline':
+      return capabilities?.tracking?.enabled === true || capabilities?.visualizing?.type === 'timeline'
+        ? 'timeline'
+        : 'split-panel'
+    case 'split-panel':
+      return 'split-panel'
+    case 'custom':
+    case undefined:
+      return uniquePaths.size > 1 ? 'diff-view' : 'split-panel'
   }
-
-  // Infer from data characteristics
-  const findings = state.findings
-
-  // Multiple documents → diff view (future)
-  const uniquePaths = new Set(findings.map(f => f.anchor.path))
-  if (uniquePaths.size > 1) {
-    return 'diff-view'
-  }
-
-  // Check if findings can be grouped (titles have common prefixes)
-  const titles = findings.map(f => f.title).filter((t): t is string => Boolean(t))
-  if (titles.length > 3) {
-    const prefixes = new Set(titles.map(title => title?.split(/[-—:：]/)[0]?.trim() ?? '').filter(Boolean))
-    if (prefixes.size > 1 && prefixes.size < titles.length / 2) {
-      return 'grouped-list'
-    }
-  }
-
-  // Default: split panel
-  return 'split-panel'
 }
 
 /**
@@ -118,7 +117,7 @@ export function ViewSwitcher(props: ViewProps) {
       view = <TimelineView {...props} />
       break
     case 'custom':
-      view = <CollaborationView {...props} />
+      view = <SplitPanelView {...props} filter={findingFilter} onFilterChange={setFindingFilter} />
       break
     default:
       // Fallback to split-panel for any unexpected viewMode value.

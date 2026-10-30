@@ -1,0 +1,82 @@
+.root {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(300px, 0.8fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base);
+}
+
+.findingsPane,
+.summaryPane {
+  min-width: 0;
+  overflow: auto;
+}
+
+.findingsPane {
+  border-right: 0.5px solid var(--dsw-alias-border-l4);
+  background: var(--dsw-alias-fill-secondary);
+}
+
+.header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  padding: 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l4);
+  background: var(--dsw-alias-fill-secondary);
+}
+
+.title,
+.groupTitle {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.title {
+  font-size: 14px;
+}
+
+.subtitle {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.groups,
+.summaryPane {
+  padding: 12px;
+}
+
+.group + .group {
+  margin-top: 20px;
+}
+
+.groupTitle {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l4);
+  font-size: 13px;
+}
+
+.groupCards {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 760px) {
+  .root {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .findingsPane,
+  .summaryPane {
+    overflow: visible;
+  }
+
+  .findingsPane {
+    border-right: 0;
+    border-bottom: 0.5px solid var(--dsw-alias-border-l4);
+  }
+}

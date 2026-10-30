@@ -1,5 +1,5 @@
 /**
- * Timeline view: shows findings and their decision/comment history chronologically.
+ * Timeline view: shows timestamped review activity chronologically.
  * Suitable for approval workflows, progress tracking, and temporal analysis.
  * @module
  */
@@ -14,7 +14,7 @@ import { RatingBadge, TagChips, scenarioMetadataOf } from './CapabilityBadges.ts
 interface TimelineEvent {
   timestamp: number
   findingId: string
-  type: 'created' | 'rated' | 'commented' | 'tagged' | 'decided'
+  type: 'created' | 'rated' | 'tagged' | 'decided'
   label: string
   detail?: string
 }
@@ -49,21 +49,6 @@ export function TimelineView({ state, t }: ViewProps) {
           type: 'rated',
           label: t('timeline.rated', { score: String(rating.score) }),
         })
-      }
-    }
-
-    // Commented events
-    if (metadata.comments !== undefined) {
-      for (const [targetId, comments] of Object.entries(metadata.comments)) {
-        for (const comment of comments) {
-          list.push({
-            timestamp: comment.timestamp,
-            findingId: targetId,
-            type: 'commented',
-            label: t('timeline.commented', { author: comment.author ?? t('label.user') }),
-            detail: comment.text,
-          })
-        }
       }
     }
 

@@ -89,7 +89,6 @@ export const zh = {
   'label.finding': '发现项',
   'timeline.created': '发现创建',
   'timeline.rated': '评分 {score}',
-  'timeline.commented': '{author} 评论',
 } satisfies Record<string, string>
 
 /** The audit namespace key union. */
@@ -184,5 +183,4 @@ export const en = {
   'label.finding': 'Finding',
   'timeline.created': 'Finding created',
   'timeline.rated': 'Score {score}',
-  'timeline.commented': '{author} commented',
 } satisfies Record<AuditKey, string>
