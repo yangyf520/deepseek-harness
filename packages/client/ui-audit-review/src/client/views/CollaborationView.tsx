@@ -64,7 +64,7 @@ export function CollaborationView({ state, t }: ViewProps) {
             }}>
               <span style={{
                 background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity],
-                borderRadius: '999px', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
+                borderRadius: '10px', height: '20px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
               }}>
                 {t(`severity.${severity}`)}
               </span>

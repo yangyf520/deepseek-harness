@@ -31,7 +31,7 @@ export function MatrixView({ state, t }: ViewProps) {
         return (
           <span style={{
             background: SEVERITY_COLOR[severity], color: 'white',
-            borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 600,
+            borderRadius: '10px', height: '20px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', padding: '2px 8px', fontSize: '11px', fontWeight: 600,
           }}>
             {t(`severity.${severity}`)}
           </span>

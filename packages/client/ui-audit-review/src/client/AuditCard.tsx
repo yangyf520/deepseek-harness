@@ -160,11 +160,11 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
             <span style={{
               minWidth: '20px', textAlign: 'center',
               background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
-              borderRadius: '999px', fontSize: '10px', padding: '1px 5px', fontWeight: 600,
+              borderRadius: '10px', height: '20px', boxSizing: 'border-box', fontSize: '10px', padding: '1px 6px', fontWeight: 600,
             }}>{i + 1}</span>
             <span style={{
               background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
-              borderRadius: '999px', fontSize: '10px', padding: '0 5px',
+              borderRadius: '10px', height: '20px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', fontSize: '10px', padding: '0 6px',
             }}>{t(`severity.${severity}`)}</span>
             <span style={{
               flex: '1 1 0%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
