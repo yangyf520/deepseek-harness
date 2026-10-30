@@ -27,6 +27,8 @@ import type {
   AuditFailure,
   AuditDecideRequest,
   AuditDecideResult,
+  AuditEditReplacementRequest,
+  AuditEditReplacementResult,
   AuditApplyRequest,
   AuditApplyResult,
   AuditExportRequest,
@@ -53,6 +55,14 @@ import { presentationHintsSchema, resolvePresentationHints } from './scenario.ts
 
 function metadataRecord(value: JsonValue | undefined): Record<string, JsonValue> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function findingsWithEditedReplacements(state: AuditState): AuditFinding[] {
+  const replacements = metadataRecord(state.scenarioMetadata?.replacements)
+  return state.findings.map((finding) => {
+    const edited = replacements[finding.id]
+    return typeof edited === 'string' ? { ...finding, replacement: edited } : finding
+  })
 }
 
 /** Escape model- and user-authored text before embedding it in an HTML export. */
@@ -816,7 +826,7 @@ This audit system is a **generic capability platform** — not tied to any speci
         return { ok: false, error: { code: 'not-text', message: `"${finding.anchor.path}" is not readable as UTF-8 text` } }
       }
     }
-    const accepted = state.findings.filter(f => f.anchor.path === finding.anchor.path && state.decisions[f.id] === 'accept' && f.replacement !== undefined)
+    const accepted = findingsWithEditedReplacements(state).filter(f => f.anchor.path === finding.anchor.path && state.decisions[f.id] === 'accept' && f.replacement !== undefined)
     const rendered = renderAccepted(base, accepted)
     if (!rendered.ok) return { ok: false, error: { code: rendered.code, message: rendered.message } }
     setSandboxMode(session, 'workspace-write')
@@ -861,7 +871,7 @@ This audit system is a **generic capability platform** — not tied to any speci
     const base = basename(source.displayPath).replace(/\.docx$/i, '')
     const filename = `${base}（修改后）.docx`
     const out = `work/${filename}`
-    const accepted = state.findings.filter(f => state.decisions[f.id] === 'accept' && f.replacement !== undefined)
+    const accepted = findingsWithEditedReplacements(state).filter(f => state.decisions[f.id] === 'accept' && f.replacement !== undefined)
     const pairs = accepted.flatMap(f => [f.anchor.quote, f.replacement ?? ''])
     const command = `python3 -c ${shellWord(exportScript)} -- ${shellWord(source.displayPath)} ${shellWord(out)}`
       + pairs.map(pair => ` ${shellWord(pair)}`).join('')
@@ -1010,6 +1020,32 @@ This audit system is a **generic capability platform** — not tied to any speci
   }
 
   /**
+   * Save an edited replacement while retaining the finding's generated replacement for restore.
+   * @param request - Session, round, finding, and edited replacement; null restores the original.
+   * @returns Whether the edited replacement was recorded.
+   */
+  @Remote('editReplacement')
+  async editReplacement(request: AuditEditReplacementRequest): Promise<AuditEditReplacementResult> {
+    const round = auditRound(this.ctx, request, 'editReplacement')
+    if (!round.ok) return round
+    const { session, state } = round
+    const finding = state.findings.find(candidate => candidate.id === request.findingId)
+    if (finding === undefined) {
+      return { ok: false, error: { code: 'finding-not-found', message: `round ${request.round} has no finding '${request.findingId}'` } }
+    }
+    if (finding.replacement === undefined) {
+      return { ok: false, error: { code: 'replacement-unavailable', message: `finding '${request.findingId}' has no replacement to edit` } }
+    }
+    const previous = metadataRecord(state.scenarioMetadata?.replacements)
+    const restoresOriginal = request.replacement === null || request.replacement === finding.replacement
+    const replacements = restoresOriginal
+      ? Object.fromEntries(Object.entries(previous).filter(([findingId]) => findingId !== request.findingId))
+      : { ...previous, [request.findingId]: request.replacement }
+    session.append('scenario/update', { ...state.scenarioMetadata, replacements })
+    return { ok: true }
+  }
+
+  /**
    * Tag any target with arbitrary labels.
    * Stores tags in scenarioMetadata.
    * @param request - Session and operation parameters.
@@ -1057,7 +1093,7 @@ This audit system is a **generic capability platform** — not tied to any speci
     const metadata = { ...state.scenarioMetadata, decisions: state.decisions }
 
     // Apply filters if provided
-    let findings = state.findings
+    let findings = findingsWithEditedReplacements(state)
     const filters = request.filters
     if (filters) {
       findings = findings.filter((f) => {

@@ -35,8 +35,8 @@ export const presentationHintsSchema = z.object({
 
 /**
  * Resolve presentation settings into the capability model consumed by every client layout.
- * Baseline workflow operations remain available when an older session or a model-authored write
- * omits capability settings; scenario-specific scoring and grouping are upgraded from legacy hints.
+ * Baseline review operations remain available when an older session or a model-authored write
+ * omits capability settings; scenario-specific scoring, grouping, and tracking stay opt-in.
  * @param hints - Stored or model-authored presentation settings.
  * @param findings - Findings used to determine whether document decisions are meaningful.
  * @returns Presentation settings with a complete baseline capability configuration.
@@ -49,7 +49,6 @@ export function resolvePresentationHints(
   const capabilities: CapabilityConfig = {
     commenting: { enabled: true },
     tagging: { enabled: true },
-    tracking: { enabled: true },
     collaboration: { enabled: true },
     exporting: { enabled: true, formats: ['csv', 'html', 'pdf'] },
     deciding: { enabled: findings.some(finding => finding.replacement !== undefined), actions: ['accept', 'reject', 'undo'] },

@@ -16,7 +16,7 @@ const t: TranslateNS<'audit'> = (key, replacements) => {
 const state: AuditState = {
   round: 3,
   documentPath: 'contract.docx',
-  findings: [{ id: 'f1', title: 'Payment term', anchor: { path: 'contract.docx', line: 1, quote: 'Net 30' }, issue: '[Medium] Review term' }],
+  findings: [{ id: 'f1', title: 'Payment term', anchor: { path: 'contract.docx', line: 1, quote: 'Net 30' }, issue: '[Medium] Review term', replacement: 'Net 15' }],
   decisions: {},
   presentationHints: { capabilities: {
     scoring: { enabled: true, target: 'finding', label: 'Risk score', range: [1, 5] },
@@ -31,6 +31,7 @@ function props(overrides: Partial<ViewProps> = {}): ViewProps {
   return {
     state, t,
     onRate: vi.fn().mockResolvedValue(true), onComment: vi.fn().mockResolvedValue(true),
+    onEditReplacement: vi.fn().mockResolvedValue(true),
     onTag: vi.fn().mockResolvedValue(true), onTrack: vi.fn().mockResolvedValue(true),
     onExportData: vi.fn().mockResolvedValue({ ok: true, data: '{}', filename: 'review.json', mimeType: 'application/json' }),
     ...overrides,
@@ -42,31 +43,19 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-it('runs score, comment, tag, tracking and export actions through one shared panel', async () => {
+it('exports reports from one compact toolbar', async () => {
   const callbacks = props()
   const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:review')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
   render(<CapabilityPanel {...callbacks} />)
-  fireEvent.click(screen.getByText('More'))
-
-  fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '4' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
-  fireEvent.change(screen.getByLabelText('Add comment'), { target: { value: 'Needs owner review' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
-  fireEvent.click(screen.getByLabelText('legal'))
-  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'in-progress' } })
   fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }))
 
-  await waitFor(() => expect(callbacks.onRate).toHaveBeenCalledWith('f1', 3, 4))
-  expect(callbacks.onComment).toHaveBeenCalledWith('f1', 3, 'Needs owner review')
-  expect(callbacks.onTag).toHaveBeenCalledWith('f1', 3, ['legal'])
-  expect(callbacks.onTrack).toHaveBeenCalledWith('f1', 3, expect.objectContaining({ status: 'in-progress' }))
   expect(callbacks.onExportData).toHaveBeenCalledWith(3, 'html')
   expect(screen.queryByRole('button', { name: 'Export JSON' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Export MARKDOWN' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Export PDF' })).toBeTruthy()
-  expect(createObjectURL).toHaveBeenCalled()
+  await waitFor(() => expect(createObjectURL).toHaveBeenCalled())
 })
 
 it('builds a printable PDF report without executable finding markup', () => {
@@ -76,36 +65,33 @@ it('builds a printable PDF report without executable finding markup', () => {
   expect(html).not.toContain('<script>alert(1)</script>')
 })
 
-it('keeps baseline workflow actions open while hiding a disabled scenario action', () => {
+it('keeps comments, scoring and progress out of the shared toolbar', () => {
   render(<CapabilityPanel {...props({ state: { ...state, presentationHints: { capabilities: { commenting: { enabled: false } } } } })} />)
-  fireEvent.click(screen.getByText('More'))
   expect(screen.getByRole('region', { name: 'Business actions' })).toBeTruthy()
+  expect(screen.queryByText('More')).toBeNull()
   expect(screen.queryByLabelText('Add comment')).toBeNull()
-  expect(screen.getByLabelText('Status')).toBeTruthy()
+  expect(screen.queryByLabelText('Status')).toBeNull()
+  expect(screen.queryByLabelText('Risk score')).toBeNull()
   expect(screen.queryByLabelText('Assignee')).toBeNull()
   expect(screen.queryByLabelText('Due date')).toBeNull()
 })
 
 it('shows a visible failure outcome', async () => {
-  render(<CapabilityPanel {...props({ onRate: vi.fn().mockResolvedValue(false) })} />)
-  fireEvent.click(screen.getByText('More'))
-  fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '2' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
+  render(<CapabilityPanel {...props({ onExportData: vi.fn().mockResolvedValue({ ok: false, error: { code: 'failed', message: 'Export failed' } }) })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }))
   const status = await screen.findByRole('status')
-  expect(status.textContent).toBe(en['operation.failed'])
+  expect(status.textContent).toBe('Export failed')
   expect(status.closest('section')).not.toBeNull()
 })
 
 it('clears transient operation feedback', async () => {
   vi.useFakeTimers()
   render(<CapabilityPanel {...props()} />)
-  fireEvent.click(screen.getByText('More'))
-  fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '3' } })
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }))
     await Promise.resolve()
   })
-  expect(screen.getByRole('status').textContent).toBe(en['operation.saved'])
+  expect(screen.getByRole('status').textContent).toBe(en['operation.exported'])
   act(() => vi.advanceTimersByTime(2_500))
   expect(screen.queryByRole('status')).toBeNull()
 })

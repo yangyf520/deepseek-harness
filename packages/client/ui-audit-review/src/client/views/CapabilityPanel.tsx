@@ -1,15 +1,12 @@
 /** Shared business-operation panel for every audit presentation. */
 import { useEffect, useState } from 'react'
-import type { AuditExportDataResult, AuditFinding, AuditTrackRequest, CapabilityConfig } from '@deepseek-ai/dsh-audit-review/types'
+import type { AuditExportDataResult, AuditFinding } from '@deepseek-ai/dsh-audit-review/types'
 import type { ViewProps } from './types.ts'
+import { scenarioMetadataOf } from './CapabilityBadges.tsx'
 import css from './CapabilityPanel.module.css'
 
-type Workflow = Pick<AuditTrackRequest, 'status' | 'assignee' | 'dueAt'>
 type Outcome = { tone: 'success' | 'error'; text: string } | null
 type VisibleExportFormat = 'csv' | 'html' | 'pdf'
-
-const fieldStyle = { minWidth: 0, padding: '6px 8px', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: '6px', background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)' }
-const buttonStyle = { ...fieldStyle, cursor: 'pointer', fontWeight: 500 }
 
 function download(result: Extract<AuditExportDataResult, { ok: true }>): void {
   const url = URL.createObjectURL(new Blob([result.data], { type: result.mimeType }))
@@ -56,24 +53,8 @@ function printPDF(findings: readonly AuditFinding[]): void {
 /** Render enabled scenario operations once, above the selected presentation. */
 export function CapabilityPanel(props: ViewProps) {
   const { state, t } = props
-  const capabilities: CapabilityConfig = {
-    commenting: { enabled: true },
-    tagging: { enabled: true },
-    tracking: { enabled: true },
-    collaboration: { enabled: true },
-    exporting: { enabled: true, formats: ['csv', 'html', 'pdf'] },
-    ...state.presentationHints?.capabilities,
-  }
-  const [targetId, setTargetId] = useState(state.findings[0]?.id ?? '')
-  const [score, setScore] = useState('')
-  const [comment, setComment] = useState('')
-  const [tags, setTags] = useState<string[]>([])
-  const [workflow, setWorkflow] = useState<Workflow>({ status: 'open' })
   const [outcome, setOutcome] = useState<Outcome>(null)
-  const [expanded, setExpanded] = useState(false)
-  const enabled = Object.values(capabilities).some(value => value?.enabled === true)
-  const allowedTags = capabilities?.tagging?.allowedTags ?? []
-  const formats: readonly VisibleExportFormat[] = capabilities.exporting?.enabled === true ? ['csv', 'html', 'pdf'] : []
+  const formats: readonly VisibleExportFormat[] = state.presentationHints?.capabilities?.exporting?.enabled === false ? [] : ['csv', 'html', 'pdf']
 
   useEffect(() => {
     if (outcome === null) return
@@ -81,19 +62,14 @@ export function CapabilityPanel(props: ViewProps) {
     return () => window.clearTimeout(timer)
   }, [outcome])
 
-  if (!enabled) return null
-
-  const settle = async (operation: Promise<boolean>, success: string): Promise<void> => {
-    try {
-      setOutcome(await operation ? { tone: 'success', text: success } : { tone: 'error', text: t('operation.failed') })
-    } catch {
-      setOutcome({ tone: 'error', text: t('operation.failed') })
-    }
-  }
   const exportData = async (format: VisibleExportFormat): Promise<void> => {
     try {
       if (format === 'pdf') {
-        printPDF(state.findings)
+        const replacements = scenarioMetadataOf(state).replacements ?? {}
+        printPDF(state.findings.map((finding) => {
+          const edited = replacements[finding.id]
+          return edited === undefined ? finding : { ...finding, replacement: edited }
+        }))
         return
       }
       const result = await props.onExportData(state.round, format)
@@ -111,47 +87,6 @@ export function CapabilityPanel(props: ViewProps) {
         {formats.map(format => <button key={format} type="button" className={css.exportButton} onClick={() => void exportData(format)}>{t('capability.export')} {format.toUpperCase()}</button>)}
       </div>}
       {outcome !== null && <span role="status" className={outcome.tone === 'error' ? css.error : css.success}>{outcome.text}</span>}
-      <button type="button" className={css.moreButton} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-        <span>{t('capability.more')}</span>
-        <span className={css.disclosure}>{t(expanded ? 'capability.collapse' : 'capability.expand')}<span aria-hidden="true" className={`${css.chevron} ${expanded ? css.chevronOpen : ''}`} /></span>
-      </button>
     </div>
-    {expanded && <div className={css.content}>
-      <div className={css.group}>
-        <div className={css.groupTitle}>{t('capability.reviewGroup')}</div>
-        <div className={css.fields}>
-          <select aria-label={t('capability.target')} value={targetId} onChange={event => setTargetId(event.target.value)} style={fieldStyle}>
-            {state.findings.map(finding => <option key={finding.id} value={finding.id}>{finding.title ?? finding.id}</option>)}
-          </select>
-          {capabilities?.scoring?.enabled === true && <>
-            <input aria-label={capabilities.scoring.label} type="number" min={capabilities.scoring.range[0]} max={capabilities.scoring.range[1]} value={score} onChange={event => setScore(event.target.value)} style={{ ...fieldStyle, width: '88px' }} />
-            <button type="button" style={buttonStyle} disabled={score === ''} onClick={() => void settle(props.onRate(targetId, state.round, Number(score)), t('operation.saved'))}>{t('capability.rate')}</button>
-          </>}
-          {capabilities?.commenting?.enabled === true && <>
-            <input aria-label={t('capability.comment')} value={comment} onChange={event => setComment(event.target.value)} style={{ ...fieldStyle, flex: '1 1 160px' }} />
-            <button type="button" style={buttonStyle} disabled={comment.trim() === ''} onClick={() => void settle(props.onComment(targetId, state.round, comment), t('operation.saved'))}>{t('capability.comment')}</button>
-          </>}
-        </div>
-      </div>
-      <div className={css.group}>
-        <div className={css.groupTitle}>{t(allowedTags.length > 0 ? 'capability.workflowGroup' : 'capability.progressGroup')}</div>
-        <div className={css.fields}>
-          {capabilities?.tagging?.enabled === true && allowedTags.map(tag => <label key={tag} style={{ fontSize: '12px' }}><input type="checkbox" checked={tags.includes(tag)} onChange={() => {
-            const next = tags.includes(tag) ? tags.filter(value => value !== tag) : [...tags, tag]
-            setTags(next)
-            void settle(props.onTag(targetId, state.round, next), t('operation.saved'))
-          }} /> {tag}</label>)}
-          {capabilities?.tracking?.enabled === true && <>
-            <select aria-label={t('capability.status')} value={workflow.status} onChange={(event) => {
-              const next: Workflow = { status: event.target.value as Workflow['status'] }
-              setWorkflow(next)
-              void settle(props.onTrack(targetId, state.round, next), t('operation.saved'))
-            }} style={fieldStyle}>
-              {(['open', 'in-progress', 'resolved', 'closed'] as const).map(status => <option key={status} value={status}>{t(`workflow.${status}`)}</option>)}
-            </select>
-          </>}
-        </div>
-      </div>
-    </div>}
   </section>
 }

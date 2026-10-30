@@ -45,6 +45,7 @@ it('filters findings by decision while retaining the original item number', asyn
     t={t}
     onDecide={vi.fn()}
     onApply={vi.fn()}
+    onEditReplacement={vi.fn()}
     filter="pending"
     onFilterChange={onFilterChange}
   />)

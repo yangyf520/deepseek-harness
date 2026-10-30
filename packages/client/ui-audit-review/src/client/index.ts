@@ -126,6 +126,9 @@ function registerAuditUi(ctx: ClientContext): void {
       onComment: (findingId: string, round: number, comment: string) => mutation(
         ctx.remote.auditReview.comment({ sessionId, round, targetId: findingId, comment }),
       ),
+      onEditReplacement: (findingId: string, round: number, replacement: string | null) => mutation(
+        ctx.remote.auditReview.editReplacement({ sessionId, round, findingId, replacement }),
+      ),
       onTag: (findingId: string, round: number, tags: readonly string[]) => mutation(
         ctx.remote.auditReview.tag({ sessionId, round, targetId: findingId, tags }),
       ),

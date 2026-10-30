@@ -19,7 +19,7 @@ interface DocumentGroup {
 /**
  * Diff view component: findings grouped by document, displayed in columns.
  */
-export function DiffView({ state, t, onDecide, onApply }: ViewProps) {
+export function DiffView({ state, t, onDecide, onApply, onEditReplacement }: ViewProps) {
   const metadata = scenarioMetadataOf(state)
   const findings = orderFindings(state.findings)
 
@@ -81,6 +81,7 @@ export function DiffView({ state, t, onDecide, onApply }: ViewProps) {
             t={t}
             onDecide={onDecide}
             onApply={onApply}
+            onEditReplacement={onEditReplacement}
           />
         ))}
       </div>
@@ -89,13 +90,14 @@ export function DiffView({ state, t, onDecide, onApply }: ViewProps) {
 }
 
 /** One document's column in the diff view. */
-function DocumentColumn({ group, state, metadata, t, onDecide, onApply }: {
+function DocumentColumn({ group, state, metadata, t, onDecide, onApply, onEditReplacement }: {
   group: DocumentGroup
   state: ViewProps['state']
   metadata: ReturnType<typeof scenarioMetadataOf>
   t: ViewProps['t']
   onDecide: ViewProps['onDecide']
   onApply: ViewProps['onApply']
+  onEditReplacement: ViewProps['onEditReplacement']
 }) {
   const { path, findings } = group
   const fileName = path.split('/').pop() ?? path
@@ -133,10 +135,12 @@ function DocumentColumn({ group, state, metadata, t, onDecide, onApply }: {
             t={t}
             onDecide={onDecide}
             onApply={onApply}
+            onEditReplacement={onEditReplacement}
             decided={state.decisions[finding.id]}
             severityLabels={state.severityLabels}
             rating={metadata.ratings?.[finding.id]}
             tags={metadata.tags?.[finding.id]}
+            editedReplacement={metadata.replacements?.[finding.id]}
           />
         ))}
       </div>

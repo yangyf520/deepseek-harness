@@ -22,6 +22,7 @@ export type ReviewPanelProps =
     onApply: (findingId: string, round: number) => Promise<boolean>
     onRate: (findingId: string, round: number, score: number) => Promise<boolean>
     onComment: (findingId: string, round: number, comment: string) => Promise<boolean>
+    onEditReplacement: (findingId: string, round: number, replacement: string | null) => Promise<boolean>
     onTag: (findingId: string, round: number, tags: readonly string[]) => Promise<boolean>
     onTrack: (findingId: string, round: number, workflow: Pick<AuditTrackRequest, 'status' | 'assignee' | 'dueAt'>) => Promise<boolean>
     onExportData: (round: number, format: 'csv' | 'json' | 'html' | 'markdown') => Promise<AuditExportDataResult>

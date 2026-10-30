@@ -276,6 +276,20 @@ export type AuditCommentResult =
   | { ok: true }
   | { ok: false; error: AuditFailure }
 
+/** Request to replace or restore the editable suggestion for one finding. */
+export interface AuditEditReplacementRequest {
+  readonly sessionId: SessionId
+  readonly round: number
+  readonly findingId: string
+  /** Edited suggestion, or `null` to restore the model-generated suggestion. */
+  readonly replacement: string | null
+}
+
+/** Result of editing a finding suggestion. */
+export type AuditEditReplacementResult =
+  | { ok: true }
+  | { ok: false; error: AuditFailure }
+
 /** Request to tag a target. */
 export interface AuditTagRequest {
   readonly sessionId: SessionId

@@ -12,7 +12,6 @@ import { MatrixView } from './MatrixView.tsx'
 import { TimelineView } from './TimelineView.tsx'
 import { CollaborationView } from './CollaborationView.tsx'
 import { DiffView } from './DiffView.tsx'
-import { CapabilityPanel } from './CapabilityPanel.tsx'
 
 /**
  * Error boundary to catch rendering errors and prevent white screen.
@@ -126,5 +125,5 @@ export function ViewSwitcher(props: ViewProps) {
       view = <SplitPanelView {...props} filter={findingFilter} onFilterChange={setFindingFilter} />
   }
 
-  return <ViewErrorBoundary failed={props.t('view.renderFailed')} retry={props.t('action.retry')}><CapabilityPanel {...props} />{view}</ViewErrorBoundary>
+  return <ViewErrorBoundary failed={props.t('view.renderFailed')} retry={props.t('action.retry')}>{view}</ViewErrorBoundary>
 }

@@ -78,7 +78,7 @@ export function prepareDocumentHtml(source: string): string {
 /**
  * Split-panel view component.
  */
-export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, onApply, filter = 'all', onFilterChange }: Pick<ViewProps, 'state' | 'sessionId' | 'readFileBytes' | 't' | 'onDecide' | 'onApply'> & { filter?: FindingFilter; onFilterChange?: (filter: FindingFilter) => void }) {
+export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, onApply, onEditReplacement, filter = 'all', onFilterChange }: Pick<ViewProps, 'state' | 'sessionId' | 'readFileBytes' | 't' | 'onDecide' | 'onApply' | 'onEditReplacement'> & { filter?: FindingFilter; onFilterChange?: (filter: FindingFilter) => void }) {
   const [docHtml, setDocHtml] = useState<string>('')
   const [docError, setDocError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -160,7 +160,11 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
 
     unwrapHighlights(container)
     clearOutlines(container)
-    applyAccepted(container, state.findings, state.decisions)
+    const previewFindings = state.findings.map((finding) => {
+      const replacement = metadata.replacements?.[finding.id]
+      return replacement === undefined ? finding : { ...finding, replacement }
+    })
+    applyAccepted(container, previewFindings, state.decisions)
 
     if (selectedFinding === null) return
 
@@ -172,7 +176,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
     if (target !== null) {
       alignToCard(scroller, target, cardRef.current)
     }
-  }, [selectedId, state.findings, state.decisions, docHtml])
+  }, [selectedId, state.findings, state.decisions, metadata.replacements, docHtml])
 
   const findings = orderFindings(state.findings)
   const codeReview = isCodePath(anchorPath)
@@ -228,10 +232,12 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
                 t={t}
                 onDecide={onDecide}
                 onApply={onApply}
+                onEditReplacement={onEditReplacement}
                 decided={state.decisions[finding.id]}
                 severityLabels={state.severityLabels}
                 rating={metadata.ratings?.[finding.id]}
                 tags={metadata.tags?.[finding.id]}
+                editedReplacement={metadata.replacements?.[finding.id]}
               />
             </div>
           ))}

@@ -33,12 +33,12 @@ it('keeps a saved decision when its file application fails', async () => {
   expect(onDecide).toHaveBeenCalledWith('f1', 1, 'accept')
 })
 
-it('acknowledges evidence without changing the file', async () => {
+it('accepts evidence without a replacement without changing the file', async () => {
   const onDecide = vi.fn().mockResolvedValue(true)
   const onApply = vi.fn().mockResolvedValue(true)
   const { replacement: _replacement, ...evidence } = finding
   render(<FindingCard finding={evidence} index={0} round={1} t={t} onDecide={onDecide} onApply={onApply} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
   await waitFor(() => expect(onDecide).toHaveBeenCalledWith('f1', 1, 'accept'))
   expect(onApply).not.toHaveBeenCalled()
 })
@@ -67,4 +67,20 @@ it('keeps decided status and undo in the header action group', () => {
   render(<FindingCard finding={finding} index={0} round={1} decided="accept" t={t} onDecide={vi.fn()} onApply={vi.fn()} />)
   const status = screen.getByText('Accepted')
   expect(status.parentElement?.contains(screen.getByRole('button', { name: 'Undo' }))).toBe(true)
+})
+
+it('edits and restores a replacement from the finding card', async () => {
+  const onEditReplacement = vi.fn().mockResolvedValue(true)
+  const { rerender } = render(<FindingCard
+    finding={finding} index={0} round={1} t={t} onDecide={vi.fn()} onApply={vi.fn()}
+    onEditReplacement={onEditReplacement}
+  />)
+  fireEvent.doubleClick(screen.getByTitle(en['finding.editHint']))
+  fireEvent.change(screen.getByLabelText('Suggested replacement'), { target: { value: 'revised' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(onEditReplacement).toHaveBeenCalledWith('f1', 1, 'revised'))
+
+  rerender(<FindingCard finding={finding} editedReplacement="revised" index={0} round={1} t={t} onDecide={vi.fn()} onApply={vi.fn()} onEditReplacement={onEditReplacement} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Restore original' }))
+  await waitFor(() => expect(onEditReplacement).toHaveBeenCalledWith('f1', 1, null))
 })

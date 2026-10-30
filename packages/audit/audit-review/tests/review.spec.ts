@@ -60,7 +60,7 @@ describe('scenario snapshots', () => {
       scoring: { enabled: true, field: 'risk', label: 'Risk', range: [1, 5] },
     }, [finding('clause', 'replacement')])
     expect(resolved.capabilities).toMatchObject({
-      commenting: { enabled: true }, tagging: { enabled: true }, tracking: { enabled: true },
+      commenting: { enabled: true }, tagging: { enabled: true },
       collaboration: { enabled: true }, exporting: { enabled: true }, deciding: { enabled: true },
       grouping: { enabled: true, groupBy: 'supplier' },
       scoring: { enabled: true, target: 'risk', label: 'Risk', range: [1, 5] },
@@ -76,7 +76,7 @@ describe('scenario event replay', () => {
     expect(configured.presentationHints?.layout).toBe('matrix')
     const reviewed = foldAudit(configured, { type: 'audit/write', seq: SessionSeq(1), time: 1, data: { round: 1, documentPath: 'a.txt', findings: [] } })
     expect(reviewed.presentationHints?.layout).toBe('matrix')
-    expect(reviewed.presentationHints?.capabilities?.tracking?.enabled).toBe(true)
+    expect(reviewed.presentationHints?.capabilities?.tracking).toBeUndefined()
     expect(empty.presentationHints).toBeUndefined()
   })
 
