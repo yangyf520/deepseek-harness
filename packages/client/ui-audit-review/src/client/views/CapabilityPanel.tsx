@@ -64,6 +64,11 @@ export function CapabilityPanel(props: ViewProps) {
       <summary className={css.summary}>
         <span>{t('capability.more')}</span>
         {outcome !== null && <span role="status" className={outcome.tone === 'error' ? css.error : css.success}>{outcome.text}</span>}
+        <span className={css.disclosure}>
+          <span className={css.expandLabel}>{t('capability.expand')}</span>
+          <span className={css.collapseLabel}>{t('capability.collapse')}</span>
+          <span aria-hidden="true" className={css.chevron} />
+        </span>
       </summary>
       <div className={css.content}>
         <div className={css.group}>

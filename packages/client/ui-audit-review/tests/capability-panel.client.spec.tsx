@@ -45,7 +45,7 @@ it('runs score, comment, tag, tracking and export actions through one shared pan
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
   render(<CapabilityPanel {...callbacks} />)
-  fireEvent.click(screen.getByText('Collaboration, progress, and export'))
+  fireEvent.click(screen.getByText('More review actions'))
 
   fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '4' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
@@ -65,7 +65,7 @@ it('runs score, comment, tag, tracking and export actions through one shared pan
 
 it('keeps baseline workflow actions open while hiding a disabled scenario action', () => {
   render(<CapabilityPanel {...props({ state: { ...state, presentationHints: { capabilities: { commenting: { enabled: false } } } } })} />)
-  fireEvent.click(screen.getByText('Collaboration, progress, and export'))
+  fireEvent.click(screen.getByText('More review actions'))
   expect(screen.getByRole('region', { name: 'Business actions' })).toBeTruthy()
   expect(screen.queryByLabelText('Add comment')).toBeNull()
   expect(screen.getByLabelText('Status')).toBeTruthy()
@@ -75,7 +75,7 @@ it('keeps baseline workflow actions open while hiding a disabled scenario action
 
 it('shows a visible failure outcome', async () => {
   render(<CapabilityPanel {...props({ onRate: vi.fn().mockResolvedValue(false) })} />)
-  fireEvent.click(screen.getByText('Collaboration, progress, and export'))
+  fireEvent.click(screen.getByText('More review actions'))
   fireEvent.change(screen.getByLabelText('Risk score'), { target: { value: '2' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save score' }))
   const status = await screen.findByRole('status')

@@ -22,7 +22,6 @@
 
 .success,
 .error {
-  margin-left: auto;
   font-size: 12px;
   font-weight: 400;
 }
@@ -33,6 +32,41 @@
 
 .error {
   color: var(--dsw-alias-state-error-primary);
+}
+
+.disclosure {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.collapseLabel {
+  display: none;
+}
+
+.chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 120ms ease;
+}
+
+.details[open] .expandLabel {
+  display: none;
+}
+
+.details[open] .collapseLabel {
+  display: inline;
+}
+
+.details[open] .chevron {
+  transform: rotate(225deg) translate(-1px, -1px);
 }
 
 .details[open] .summary {
@@ -85,5 +119,11 @@
 
   .group:last-child:nth-child(odd) {
     grid-column: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
   }
 }
