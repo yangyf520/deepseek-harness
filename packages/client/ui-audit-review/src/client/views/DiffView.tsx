@@ -5,10 +5,13 @@
  */
 
 import { useMemo } from 'react'
+import type { CSSProperties } from 'react'
 import type { ViewProps } from './types.ts'
 import { orderFindings } from '../AuditCard.tsx'
 import { scenarioMetadataOf } from './CapabilityBadges.tsx'
 import { FindingCard } from './FindingCard.tsx'
+import { ScenarioView } from './ScenarioView.tsx'
+import css from './SpecializedViews.module.css'
 
 /** One document's findings grouped by path. */
 interface DocumentGroup {
@@ -39,39 +42,16 @@ export function DiffView({ state, t, onDecide, onApply, onEditReplacement }: Vie
   const rejected = Object.entries(state.decisions).filter(([, d]) => d === 'reject').length
 
   return (
-    <div style={{ padding: '16px', overflow: 'auto' }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: '20px', padding: '12px 16px',
-        background: 'var(--dsw-alias-fill-secondary)',
-        borderRadius: '8px',
-      }}>
-        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>
-          {state.cardTitle ?? t('overview.title')}
-        </div>
-        <div style={{ display: 'flex', gap: '8px', fontSize: '12px' }}>
-          <div style={{ padding: '2px 8px', borderRadius: '999px', background: 'var(--dsw-alias-bg-base)' }}>
-            <span style={{ fontWeight: 500 }}>{findings.length}</span> {t('overview.findings')}
-          </div>
-          <div style={{ padding: '2px 8px', borderRadius: '999px', background: 'var(--dsw-alias-bg-base)' }}>
-            <span style={{ fontWeight: 500, color: 'var(--dsw-alias-state-business-primary)' }}>{accepted}</span> {t('status.accepted')}
-          </div>
-          <div style={{ padding: '2px 8px', borderRadius: '999px', background: 'var(--dsw-alias-bg-base)' }}>
-            <span style={{ fontWeight: 500, color: 'var(--dsw-alias-state-error-primary)' }}>{rejected}</span> {t('status.rejected')}
-          </div>
-          <div style={{ padding: '2px 8px', borderRadius: '999px', background: 'var(--dsw-alias-bg-base)' }}>
-            <span style={{ fontWeight: 500 }}>{documentGroups.length}</span> {t('count.documents')}
-          </div>
-        </div>
-      </div>
-
-      {/* Document columns */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${documentGroups.length}, 1fr)`,
-        gap: '16px',
-      }}>
+    <ScenarioView
+      title={state.cardTitle ?? t('overview.title')}
+      summary={<>
+        <span className={css.metric}><strong>{findings.length}</strong> {t('overview.findings')}</span>
+        <span className={`${css.metric} ${css.accepted}`}><strong>{accepted}</strong> {t('status.accepted')}</span>
+        <span className={`${css.metric} ${css.rejected}`}><strong>{rejected}</strong> {t('status.rejected')}</span>
+        <span className={css.metric}><strong>{documentGroups.length}</strong> {t('count.documents')}</span>
+      </>}
+    >
+      <div className={css.columns} style={{ '--audit-column-count': documentGroups.length } as CSSProperties}>
         {documentGroups.map(group => (
           <DocumentColumn
             key={group.path}
@@ -85,7 +65,7 @@ export function DiffView({ state, t, onDecide, onApply, onEditReplacement }: Vie
           />
         ))}
       </div>
-    </div>
+    </ScenarioView>
   )
 }
 
@@ -103,28 +83,19 @@ function DocumentColumn({ group, state, metadata, t, onDecide, onApply, onEditRe
   const fileName = path.split('/').pop() ?? path
 
   return (
-    <div style={{
-      border: '1px solid var(--dsw-alias-border-l4)',
-      borderRadius: '8px',
-      background: 'var(--dsw-alias-bg-base)',
-      overflow: 'hidden',
-    }}>
+    <section className={css.column}>
       {/* Column header */}
-      <div style={{
-        padding: '12px 16px',
-        background: 'var(--dsw-alias-fill-secondary)',
-        borderBottom: '1px solid var(--dsw-alias-border-l4)',
-      }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary, rgb(30, 35, 45))' }}>
+      <header className={css.columnHeader}>
+        <div className={css.columnTitle} title={path}>
           {fileName}
         </div>
-        <div style={{ fontSize: '11px', color: 'var(--dsw-alias-label-secondary, rgb(102, 112, 133))', marginTop: '4px' }}>
+        <div className={css.columnMeta}>
           {findings.length} {t('overview.findings')}
         </div>
-      </div>
+      </header>
 
       {/* Findings list */}
-      <div style={{ padding: '12px', maxHeight: '600px', overflow: 'auto' }}>
+      <div className={css.cardList}>
         {findings.map((finding, index) => (
           <FindingCard
             key={`${state.round}:${finding.id}`}
@@ -144,6 +115,6 @@ function DocumentColumn({ group, state, metadata, t, onDecide, onApply, onEditRe
           />
         ))}
       </div>
-    </div>
+    </section>
   )
 }

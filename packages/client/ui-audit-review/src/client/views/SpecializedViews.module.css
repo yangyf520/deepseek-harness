@@ -1,0 +1,190 @@
+.metric {
+  padding: 2px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 999px;
+  background: var(--dsw-alias-fill-secondary);
+}
+
+.metric strong {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.accepted strong {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.rejected strong {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(var(--audit-column-count), minmax(300px, 1fr));
+  gap: 12px;
+  min-width: min-content;
+}
+
+.column {
+  overflow: hidden;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-base);
+}
+
+.columnHeader {
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l4);
+  background: var(--dsw-alias-fill-secondary);
+}
+
+.columnTitle {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columnMeta {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.cardList {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.tableFrame {
+  overflow-x: auto;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.matrix th,
+.matrix td {
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l4);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.matrix th {
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-fill-secondary);
+  font-weight: 500;
+}
+
+.matrix th:first-child,
+.matrix td:first-child {
+  min-width: 260px;
+  text-align: left;
+}
+
+.matrix tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.findingTitle {
+  margin-bottom: 4px;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.findingDetail,
+.eventDetail {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.decision {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.decisionAccepted {
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.decisionRejected {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.pending {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.timeline {
+  position: relative;
+  padding-left: 24px;
+}
+
+.timeline::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 8px;
+  width: 1px;
+  background: var(--dsw-alias-border-l4);
+  content: '';
+}
+
+.event {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.event:last-child {
+  margin-bottom: 0;
+}
+
+.eventDot {
+  position: absolute;
+  top: 11px;
+  left: -20px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--dsw-alias-bg-base);
+  border-radius: 50%;
+}
+
+.eventCard {
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-base);
+}
+
+.eventHeader {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.eventTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.eventTime {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}

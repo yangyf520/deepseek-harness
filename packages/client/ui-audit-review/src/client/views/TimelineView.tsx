@@ -9,12 +9,14 @@ import type { ViewProps } from './types.ts'
 import { parseIssue, SEVERITY_COLOR } from '../AuditCard.tsx'
 import { findingSummary } from '../AuditCard.tsx'
 import { RatingBadge, TagChips, scenarioMetadataOf } from './CapabilityBadges.tsx'
+import { ScenarioView } from './ScenarioView.tsx'
+import css from './SpecializedViews.module.css'
 
 /** Timeline event: a timestamped occurrence on a finding. */
 interface TimelineEvent {
   timestamp: number
   findingId: string
-  type: 'created' | 'rated' | 'tagged' | 'decided'
+  type: 'created' | 'rated'
   label: string
   detail?: string
 }
@@ -59,45 +61,20 @@ export function TimelineView({ state, t }: ViewProps) {
   }, [state.findings, metadata, t])
 
   return (
-    <div style={{ padding: '16px', overflow: 'auto' }}>
-      <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px', color: 'var(--dsw-alias-label-primary)' }}>
-        {state.cardTitle ?? t('view.timeline')}
-      </div>
-
-      <div style={{ position: 'relative', paddingLeft: '24px' }}>
-        {/* Vertical line */}
-        <div style={{
-          position: 'absolute', left: '8px', top: 0, bottom: 0, width: '2px',
-          background: 'var(--dsw-alias-border-l4)',
-        }} />
-
+    <ScenarioView title={state.cardTitle ?? t('view.timeline')}>
+      <div className={css.timeline}>
         {events.map((event, index) => {
           const finding = state.findings.find(f => f.id === event.findingId)
           const severity = finding !== undefined ? parseIssue(finding.issue).severity : 'low'
-          const decision = finding !== undefined ? state.decisions[finding.id] : undefined
 
           return (
-            <div key={index} style={{ position: 'relative', marginBottom: '16px' }}>
-              {/* Dot */}
-              <div style={{
-                position: 'absolute', left: '-20px', top: '4px',
-                width: '12px', height: '12px', borderRadius: '50%',
-                background: event.type === 'created' ? SEVERITY_COLOR[severity]
-                  : event.type === 'decided' ? (decision === 'accept' ? 'var(--dsw-alias-state-business-primary)' : 'var(--dsw-alias-state-error-primary)')
-                    : 'var(--dsw-alias-state-business-primary, rgb(23, 92, 211))',
-                border: '2px solid white',
-              }} />
-
-              {/* Card */}
-              <div style={{
-                padding: '10px 12px',
-                border: '1px solid var(--dsw-alias-border-l4, rgb(234, 236, 240))',
-                borderRadius: '8px', background: 'var(--dsw-alias-bg-base)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{event.label}</span>
+            <div key={`${event.findingId}:${event.type}:${event.timestamp}:${index}`} className={css.event}>
+              <div className={css.eventDot} style={{ background: event.type === 'created' ? SEVERITY_COLOR[severity] : 'var(--dsw-alias-state-business-primary)' }} />
+              <div className={css.eventCard}>
+                <div className={css.eventHeader}>
+                  <span className={css.eventTitle}>{event.label}</span>
                   {event.timestamp > 0 && (
-                    <span style={{ fontSize: '10px', color: 'var(--dsw-alias-label-tertiary, rgb(178, 106, 0))' }}>
+                    <span className={css.eventTime}>
                       {new Date(event.timestamp).toLocaleString()}
                     </span>
                   )}
@@ -109,7 +86,7 @@ export function TimelineView({ state, t }: ViewProps) {
                   )}
                 </div>
                 {event.detail !== undefined && (
-                  <div style={{ fontSize: '11px', color: 'var(--dsw-alias-label-secondary, rgb(102, 112, 133))', lineHeight: 1.5 }}>
+                  <div className={css.eventDetail}>
                     {event.detail}
                   </div>
                 )}
@@ -118,6 +95,6 @@ export function TimelineView({ state, t }: ViewProps) {
           )
         })}
       </div>
-    </div>
+    </ScenarioView>
   )
 }
