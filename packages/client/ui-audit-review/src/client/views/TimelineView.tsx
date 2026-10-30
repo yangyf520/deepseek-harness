@@ -98,7 +98,7 @@ export function TimelineView({ state, t }: ViewProps) {
                 position: 'absolute', left: '-20px', top: '4px',
                 width: '12px', height: '12px', borderRadius: '50%',
                 background: event.type === 'created' ? SEVERITY_COLOR[severity]
-                  : event.type === 'decided' ? (decision === 'accept' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)')
+                  : event.type === 'decided' ? (decision === 'accept' ? 'var(--dsw-alias-state-business-primary)' : 'var(--dsw-alias-state-error-primary)')
                     : 'var(--dsw-alias-state-business-primary, rgb(23, 92, 211))',
                 border: '2px solid white',
               }} />

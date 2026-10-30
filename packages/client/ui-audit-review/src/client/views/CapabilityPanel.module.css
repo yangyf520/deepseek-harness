@@ -28,7 +28,7 @@
 }
 
 .success {
-  color: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .error {

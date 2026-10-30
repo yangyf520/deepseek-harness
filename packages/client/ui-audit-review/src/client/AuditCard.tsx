@@ -19,14 +19,14 @@ export type Severity = 'high' | 'medium' | 'low'
 export const SEVERITY_COLOR: Record<Severity, string> = {
   high: '#b91c1c',
   medium: '#b45309',
-  low: '#047857',
+  low: 'var(--dsw-alias-state-business-primary, rgb(23, 92, 211))',
 }
 
 /** Light severity backgrounds for cards and document highlights. */
 export const SEVERITY_BG: Record<Severity, string> = {
   high: '#fee2e2',
   medium: '#fef3c7',
-  low: '#d1fae5',
+  low: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, rgb(23, 92, 211)) 12%, var(--dsw-alias-bg-base))',
 }
 
 /** The level prefix `audit_write` requires at the start of every issue. */

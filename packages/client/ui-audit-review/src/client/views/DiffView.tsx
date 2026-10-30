@@ -55,7 +55,7 @@ export function DiffView({ state, t, onDecide, onApply }: ViewProps) {
             <span style={{ fontWeight: 500 }}>{findings.length}</span> {t('overview.findings')}
           </div>
           <div style={{ padding: '2px 8px', borderRadius: '999px', background: 'var(--dsw-alias-bg-base)' }}>
-            <span style={{ fontWeight: 500, color: 'var(--dsw-alias-state-success-primary)' }}>{accepted}</span> {t('status.accepted')}
+            <span style={{ fontWeight: 500, color: 'var(--dsw-alias-state-business-primary)' }}>{accepted}</span> {t('status.accepted')}
           </div>
           <div style={{ padding: '2px 8px', borderRadius: '999px', background: 'var(--dsw-alias-bg-base)' }}>
             <span style={{ fontWeight: 500, color: 'var(--dsw-alias-state-error-primary)' }}>{rejected}</span> {t('status.rejected')}

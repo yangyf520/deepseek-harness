@@ -54,7 +54,7 @@ export function CollaborationView({ state, t }: ViewProps) {
         return (
           <div key={finding.id} style={{
             marginBottom: '16px',
-            border: `1px solid ${decision === 'accept' ? 'var(--dsw-alias-state-success-primary)' : decision === 'reject' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-border-l4)'}`,
+            border: `1px solid ${decision === 'accept' ? 'var(--dsw-alias-state-business-primary)' : decision === 'reject' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-border-l4)'}`,
             borderRadius: '8px', background: 'var(--dsw-alias-bg-base)',
           }}>
             {/* Finding header */}
@@ -75,7 +75,7 @@ export function CollaborationView({ state, t }: ViewProps) {
               <TagChips tags={metadata.tags?.[finding.id]} />
               {decision !== undefined && (
                 <span style={{
-                  background: decision === 'accept' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)',
+                  background: decision === 'accept' ? 'var(--dsw-alias-state-business-primary)' : 'var(--dsw-alias-state-error-primary)',
                   color: 'white', borderRadius: '999px', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
                 }}>
                   {t(decision === 'accept' ? 'status.accepted' : 'status.rejected')}

@@ -8,7 +8,7 @@ import { RatingBadge, TagChips } from './CapabilityBadges.tsx'
 
 /** Header border color per decision. */
 const DECISION_BORDER: Record<'accept' | 'reject' | 'pending', string> = {
-  accept: 'var(--dsw-alias-state-success-primary, rgb(34, 139, 34))',
+  accept: 'var(--dsw-alias-state-business-primary, rgb(23, 92, 211))',
   reject: 'var(--dsw-alias-state-error-primary, rgb(217, 45, 32))',
   pending: 'var(--dsw-alias-border-l4)',
 }
@@ -71,14 +71,14 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
     <div style={{
       padding: '12px',
       border: `1px solid ${DECISION_BORDER[decided ?? 'pending']}`,
-      borderRadius: '12px',
+      borderRadius: 'var(--dsw-radius-sm)',
       background: 'var(--dsw-alias-bg-base)',
       marginBottom: '8px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
         <span style={{
           background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity],
-          borderRadius: '999px', minHeight: '26px',
+          borderRadius: '13px', height: '26px', overflow: 'hidden',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
           padding: '0 10px 0 4px', fontSize: '10px', fontWeight: 500, flexShrink: 0,
         }}>
@@ -97,30 +97,30 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
           <>
             <button type="button" disabled={deciding} onClick={() => { void decide('accept') }} style={{
               padding: '4px 12px', fontSize: '12px', cursor: deciding ? 'wait' : 'pointer',
-              background: 'var(--dsw-alias-state-success-primary)', color: '#ffffff', border: 'none', borderRadius: '12px',
+              background: 'var(--dsw-alias-state-business-primary)', color: '#ffffff', border: 'none', borderRadius: 'var(--dsw-radius-sm)',
               height: '24px',
             }}>{deciding ? '…' : (finding.replacement !== undefined ? t('action.accept') : t('action.acknowledge'))}</button>
             <button type="button" disabled={deciding} onClick={() => { void decide('reject') }} style={{
               padding: '4px 12px', fontSize: '12px', cursor: deciding ? 'wait' : 'pointer',
-              background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', border: '1px solid var(--dsw-alias-state-error-primary)', borderRadius: '12px',
+              background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', border: '1px solid var(--dsw-alias-state-error-primary)', borderRadius: 'var(--dsw-radius-sm)',
               height: '24px',
             }}>{deciding ? '…' : (finding.replacement !== undefined ? t('action.reject') : t('action.ignore'))}</button>
           </>
         ) : <>
-          <span style={{ fontSize: '12px', color: decided === 'accept' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)', fontWeight: 500 }}>
+          <span style={{ fontSize: '12px', color: decided === 'accept' ? 'var(--dsw-alias-state-business-primary)' : 'var(--dsw-alias-state-error-primary)', fontWeight: 500 }}>
             {t(decided === 'accept' ? 'status.accepted' : 'status.rejected')}
           </span>
           <button type="button" disabled={deciding} onClick={() => { void decide('undo') }} style={{
             padding: '4px 12px', fontSize: '12px', cursor: deciding ? 'wait' : 'pointer',
-            background: 'transparent', color: 'var(--dsw-alias-label-secondary)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: '12px', height: '24px',
+            background: 'transparent', color: 'var(--dsw-alias-label-secondary)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-sm)', height: '24px',
           }}>{t('action.undo')}</button>
         </>}
       </div>
-      <div style={{ fontSize: '13px', marginBottom: '8px', lineHeight: 1.4, padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', borderRadius: '12px', color: 'var(--dsw-alias-label-primary)' }}>
+      <div style={{ fontSize: '13px', marginBottom: '8px', lineHeight: 1.4, padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', borderRadius: 'var(--dsw-radius-sm)', color: 'var(--dsw-alias-label-primary)' }}>
         {prose}
       </div>
       {finding.replacement !== undefined && (
-        <div style={{ fontSize: '12px', lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary)', padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: '12px' }}>
+        <div style={{ fontSize: '12px', lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary)', padding: '8px 10px', background: 'var(--dsw-alias-bg-elevated)', border: '1px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-sm)' }}>
           <strong style={{ color: 'var(--dsw-alias-state-business-primary)' }}>{t('finding.suggestion')}:</strong> {finding.replacement || t('finding.delete')}
         </div>
       )}

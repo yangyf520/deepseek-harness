@@ -66,7 +66,7 @@ export function MatrixView({ state, t }: ViewProps) {
         if (decision === undefined) return <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{t('status.pending')}</span>
         return (
           <span style={{
-            background: decision === 'accept' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)',
+            background: decision === 'accept' ? 'var(--dsw-alias-state-business-primary)' : 'var(--dsw-alias-state-error-primary)',
             color: 'white', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 600,
           }}>
             {t(decision === 'accept' ? 'action.accept' : 'action.reject')}
