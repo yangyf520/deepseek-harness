@@ -7,13 +7,6 @@ import { splitBasis } from '../regulation.ts'
 import { RatingBadge, TagChips } from './CapabilityBadges.tsx'
 import css from './ReviewPresentation.module.css'
 
-/** Header border color per decision. */
-const DECISION_BORDER: Record<'accept' | 'reject' | 'pending', string> = {
-  accept: 'var(--dsw-alias-state-business-primary, rgb(23, 92, 211))',
-  reject: 'var(--dsw-alias-state-error-primary, rgb(217, 45, 32))',
-  pending: 'var(--dsw-alias-border-l4)',
-}
-
 /**
  * Shared evidence, decision and file-application controls for review layouts.
  * @param props - Finding, current decision and injected operations.
@@ -72,7 +65,7 @@ export function FindingCard({ finding, index, round, t, onDecide, onApply, decid
   return (
     <div style={{
       padding: '12px',
-      border: `1px solid ${DECISION_BORDER[decided ?? 'pending']}`,
+      border: '0.5px solid var(--dsw-alias-border-l4)',
       borderRadius: 'var(--dsw-radius-sm)',
       background: 'var(--dsw-alias-bg-base)',
       marginBottom: '8px',
