@@ -132,113 +132,87 @@ function SummaryVisualization({ groups, state, t }: { groups: Array<{ key: strin
 
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '24px', color: 'var(--dsw-alias-label-primary, rgb(30, 35, 45))' }}>
+      <h2 className={css.summaryTitle}>
         {t('label.summary')}
       </h2>
 
       {/* Overall statistics */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px',
-      }}>
-        <div style={{
-          padding: '16px', borderRadius: '8px',
-          background: SEVERITY_BG.high, border: `1px solid ${SEVERITY_COLOR.high}`,
-        }}>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: SEVERITY_COLOR.high }}>{highCount}</div>
-          <div style={{ fontSize: '12px', color: SEVERITY_COLOR.high }}>{severityLabels(state.severityLabels, 'high', t)}</div>
+      <div className={`${css.severityGrid} ${css.summarySection}`}>
+        <div className={css.severityMetric} style={{ color: SEVERITY_COLOR.high, background: SEVERITY_BG.high }}>
+          <div className={css.severityValue}>{highCount}</div>
+          <div className={css.severityLabel}>{severityLabels(state.severityLabels, 'high', t)}</div>
         </div>
-        <div style={{
-          padding: '16px', borderRadius: '8px',
-          background: SEVERITY_BG.medium, border: `1px solid ${SEVERITY_COLOR.medium}`,
-        }}>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: SEVERITY_COLOR.medium }}>{mediumCount}</div>
-          <div style={{ fontSize: '12px', color: SEVERITY_COLOR.medium }}>{severityLabels(state.severityLabels, 'medium', t)}</div>
+        <div className={css.severityMetric} style={{ color: SEVERITY_COLOR.medium, background: SEVERITY_BG.medium }}>
+          <div className={css.severityValue}>{mediumCount}</div>
+          <div className={css.severityLabel}>{severityLabels(state.severityLabels, 'medium', t)}</div>
         </div>
-        <div style={{
-          padding: '16px', borderRadius: '8px',
-          background: SEVERITY_BG.low, border: `1px solid ${SEVERITY_COLOR.low}`,
-        }}>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: SEVERITY_COLOR.low }}>{lowCount}</div>
-          <div style={{ fontSize: '12px', color: SEVERITY_COLOR.low }}>{severityLabels(state.severityLabels, 'low', t)}</div>
+        <div className={css.severityMetric} style={{ color: SEVERITY_COLOR.low, background: SEVERITY_BG.low }}>
+          <div className={css.severityValue}>{lowCount}</div>
+          <div className={css.severityLabel}>{severityLabels(state.severityLabels, 'low', t)}</div>
         </div>
       </div>
 
       {/* Rating leaderboard when scoring capability has produced data */}
       {metadata.ratings !== undefined && Object.keys(metadata.ratings).length > 0 && (
-        <div style={{ marginBottom: '24px' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px', color: 'var(--dsw-alias-label-primary, rgb(30, 35, 45))' }}>
+        <section className={css.summarySection}>
+          <h3 className={css.sectionTitle}>
             {t('label.ranking')}
           </h3>
-          {Object.entries(metadata.ratings)
+          <div className={css.summaryList}>{Object.entries(metadata.ratings)
             .sort(([, a], [, b]) => b.score - a.score)
             .map(([targetId, rating]) => {
               const finding = state.findings.find(f => f.id === targetId)
               return (
-                <div key={targetId} style={{
-                  display: 'flex', alignItems: 'center', gap: '12px',
-                  padding: '10px 12px', marginBottom: '8px',
-                  border: '1px solid var(--dsw-alias-border-l4, rgb(234, 236, 240))',
-                  borderRadius: '6px',
-                }}>
-                  <div style={{
-                    width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'var(--dsw-alias-state-business-primary, rgb(23, 92, 211))', color: 'white',
-                    fontSize: '13px', fontWeight: 700,
-                  }}>
+                <div key={targetId} className={css.summaryRow}>
+                  <div className={css.score}>
                     {rating.score}
                   </div>
-                  <div style={{ flex: '1', fontSize: '13px', fontWeight: 600 }}>
+                  <div className={css.rowLabel}>
                     {finding !== undefined ? findingSummary(finding) : targetId}
                   </div>
                   <TagChips tags={metadata.tags?.[targetId]} />
                 </div>
               )
-            })}
-        </div>
+            })}</div>
+        </section>
       )}
 
       {/* Group breakdown */}
-      <div style={{ marginBottom: '24px' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px', color: 'var(--dsw-alias-label-primary, rgb(30, 35, 45))' }}>
+      <section className={css.summarySection}>
+        <h3 className={css.sectionTitle}>
           {t('label.groupStats')}
         </h3>
-        {groups.map((group) => {
+        <div className={css.summaryList}>{groups.map((group) => {
           const groupSeverities = group.findings.map(f => parseIssue(f.issue).severity)
           const groupHigh = groupSeverities.filter((s: string) => s === 'high').length
           const groupMedium = groupSeverities.filter((s: string) => s === 'medium').length
           const groupLow = groupSeverities.filter((s: string) => s === 'low').length
 
           return (
-            <div key={group.key} style={{
-              display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '12px', marginBottom: '8px',
-              border: '1px solid var(--dsw-alias-border-l4, rgb(234, 236, 240))',
-              borderRadius: '6px',
-            }}>
-              <div style={{ flex: '1', fontSize: '13px', fontWeight: 600 }}>{group.label}</div>
-              <div style={{ display: 'flex', gap: '8px', fontSize: '12px' }}>
+            <div key={group.key} className={css.summaryRow}>
+              <div className={css.rowLabel}>{group.label}</div>
+              <div className={css.severityCounts}>
                 {groupHigh > 0 && <span style={{ color: SEVERITY_COLOR.high }}>{groupHigh}</span>}
                 {groupMedium > 0 && <span style={{ color: SEVERITY_COLOR.medium }}>{groupMedium}</span>}
                 {groupLow > 0 && <span style={{ color: SEVERITY_COLOR.low }}>{groupLow}</span>}
               </div>
             </div>
           )
-        })}
-      </div>
+        })}</div>
+      </section>
 
       {/* User goals if available */}
       {state.presentationHints?.userGoals && state.presentationHints.userGoals.length > 0 && (
-        <div>
-          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px', color: 'var(--dsw-alias-label-primary, rgb(30, 35, 45))' }}>
+        <section>
+          <h3 className={css.sectionTitle}>
             {t('label.goals')}
           </h3>
-          <ul style={{ fontSize: '13px', lineHeight: 1.8, color: 'var(--dsw-alias-label-secondary, rgb(102, 112, 133))', paddingLeft: '20px' }}>
+          <ul className={css.goals}>
             {state.presentationHints.userGoals.map((goal: string, i: number) => (
               <li key={i}>{goal}</li>
             ))}
           </ul>
-        </div>
+        </section>
       )}
     </div>
   )

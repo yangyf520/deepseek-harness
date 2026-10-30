@@ -11,6 +11,7 @@ import { GroupedListView } from './GroupedListView.tsx'
 import { MatrixView } from './MatrixView.tsx'
 import { TimelineView } from './TimelineView.tsx'
 import { DiffView } from './DiffView.tsx'
+import { ScenarioEmptyState } from './ScenarioView.tsx'
 
 /**
  * Error boundary to catch rendering errors and prevent white screen.
@@ -96,6 +97,7 @@ export function chooseViewMode(state: AuditState): ViewMode {
 export function ViewSwitcher(props: ViewProps) {
   const { state } = props
   const [findingFilter, setFindingFilter] = useState<FindingFilter>('all')
+  if (state.findings.length === 0) return <ScenarioEmptyState>{props.t('preview.empty')}</ScenarioEmptyState>
   const viewMode = chooseViewMode(state)
 
   // Render the appropriate view based on viewMode, with split-panel as the safe fallback.

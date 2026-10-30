@@ -45,6 +45,17 @@
   padding: 12px;
 }
 
+.empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  padding: 24px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-base);
+  font-size: 13px;
+  text-align: center;
+}
+
 @media (max-width: 640px) {
   .header {
     align-items: flex-start;

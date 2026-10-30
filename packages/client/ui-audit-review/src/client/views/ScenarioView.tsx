@@ -22,3 +22,8 @@ export function ScenarioView({ title, summary, children }: {
     </section>
   )
 }
+
+/** Present the same empty result in every review mode. */
+export function ScenarioEmptyState({ children }: { children: ReactNode }) {
+  return <div className={css.empty}>{children}</div>
+}
