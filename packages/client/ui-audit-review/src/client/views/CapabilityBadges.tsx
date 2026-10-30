@@ -10,6 +10,7 @@ export interface ScenarioMetadata {
   tags?: Record<string, string[]>
   comments?: Record<string, ReadonlyArray<{ text: string; author?: string; timestamp: number }>>
   grouping?: { groupBy: string; groups: Record<string, string[]> }
+  workflow?: Record<string, { status: 'open' | 'in-progress' | 'resolved' | 'closed'; updatedAt: number }>
   [key: string]: unknown
 }
 

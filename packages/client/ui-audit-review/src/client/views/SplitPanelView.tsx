@@ -178,6 +178,7 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
   const codeReview = isCodePath(anchorPath)
   const accepted = Object.entries(state.decisions).filter(([, d]) => d === 'accept').length
   const rejected = Object.entries(state.decisions).filter(([, d]) => d === 'reject').length
+  const resolved = Object.values(metadata.workflow ?? {}).filter(item => item.status === 'resolved').length
 
   return (
     <div className={css.root}>
@@ -191,7 +192,8 @@ export function SplitPanelView({ state, sessionId, readFileBytes, t, onDecide, o
             {codeReview ? t('overview.codeTitle') : (state.cardTitle ?? t('overview.title'))} ({findings.length})
           </div>
           <div className={css.findingsSummary}>
-            {state.summary ?? <>{accepted} {t('status.accepted')} · {rejected} {t('status.rejected')}</>}
+            {state.summary !== undefined && <>{state.summary} · </>}
+            {accepted} {t('status.accepted')} · {resolved} {t('workflow.resolved')} · {rejected} {t('status.rejected')}
           </div>
         </div>
         <div style={{ padding: '16px' }}>
