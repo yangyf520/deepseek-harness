@@ -124,7 +124,7 @@ interface AuditOverviewProps {
   t: TranslateNS<'audit'>
 }
 
-/** Overview card showing summary and finding list. */
+/** Overview card showing the summary and leading findings inside one neutral hairline border. */
 export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditOverviewProps) {
   const findings = orderFindings(state.findings)
   const severities = findings.map(f => parseIssue(f.issue).severity)
@@ -137,10 +137,7 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
   const hasDecisions = accepted + rejected > 0
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px',
-      border: '1px solid var(--dsw-alias-border-l4)', borderRadius: '6px',
-    }}>
+    <div className={css.overviewCard}>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
         <strong style={{ fontSize: '12px' }}>{state.cardTitle ?? t('overview.title')}</strong>
         <span style={{ fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }}>
