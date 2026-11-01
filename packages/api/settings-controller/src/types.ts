@@ -31,6 +31,11 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
      * The details name only the reference, never the value.
      */
     'credential/forbidden': { readonly ref: string }
+    /**
+     * The caller may not change system settings: only administrators may modify
+     * deployment-wide configuration that affects all tenants.
+     */
+    'settings/forbidden': Record<string, never>
   }
 }
 

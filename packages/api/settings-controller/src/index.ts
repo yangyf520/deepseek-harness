@@ -11,6 +11,7 @@ import { Context } from '@deepseek-ai/cordis'
 import {
   openNativeTextFile,
 } from '@deepseek-ai/dsh-native-command'
+import { TenantGuard } from '@deepseek-ai/dsh-api-remote-access'
 import type { SettingsDescriptor, SettingsPathOp, SettingsForms } from '@deepseek-ai/dsh-settings'
 import type {
   SettingsDescribeValue, SettingsNamespaceView, SettingsPathOpView,
@@ -165,6 +166,7 @@ export class SettingsController extends TypertRemoteService {
    */
   @Remote
   async openSettingsDocument(signal: AbortSignal): Promise<SettingsDocumentOpenValue> {
+    this.requireManage()
     const settings = this.provider()
     if (isAborted(signal)) throw new RemoteError('gateway/cancelled', 'settings document open was aborted', {})
     let path: string
@@ -190,6 +192,7 @@ export class SettingsController extends TypertRemoteService {
     input: Record<string, JsonValue> | SettingsPathOpView[],
     expectedRevision: number | undefined,
   ): Promise<SettingsNamespaceView> {
+    this.requireManage()
     const parsed = settingsNamespaceRequestSchema.safeParse({ ns })
     if (!parsed.success) {
       throw new RemoteError('gateway/bad-request', `invalid payload for settings.${mode}`, { issues: parsed.error.issues })
@@ -223,6 +226,28 @@ export class SettingsController extends TypertRemoteService {
       )
     }
     return settings
+  }
+
+  /**
+   * Whether the current caller may change system-wide settings.
+   * @returns true for a system administrator and outside a tenant request.
+   */
+  private canManage(): boolean {
+    return new TenantGuard(this.ctx).isSystemAdmin()
+  }
+
+  /**
+   * Reject a write the caller may not perform. System settings affect every tenant,
+   * so only administrators may change them.
+   * @throws RemoteError 'settings/forbidden' when the caller is not an administrator.
+   */
+  private requireManage(): void {
+    if (this.canManage()) return
+    throw new RemoteError(
+      'settings/forbidden',
+      'system settings can only be changed by a system administrator',
+      {},
+    )
   }
 }
 

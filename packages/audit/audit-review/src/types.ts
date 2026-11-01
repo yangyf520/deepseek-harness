@@ -53,11 +53,21 @@ export interface AuditDecide {
   readonly round: number
   readonly findingId: string
   readonly decision: AuditDecision
+  /** User who made the decision (from OAuth identity cookie). */
+  readonly userId?: string
+  readonly displayName?: string
 }
 
 /** Session event: update scenario metadata (ratings, comments, tags, groupings, etc.) */
 export interface ScenarioUpdate {
   readonly [key: string]: JsonValue
+}
+
+/** Session event: apply accepted findings to the document (triggers verification round). */
+export interface AuditApply {
+  readonly round: number
+  readonly findingId: string
+  readonly verificationRound: number
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
@@ -66,6 +76,8 @@ declare module '@deepseek-ai/dsh-session/types' {
     'audit/write': AuditWrite
     /** One user decision on one finding of the named round; `undo` clears that finding's earlier decision. */
     'audit/decide': AuditDecide
+    /** Apply accepted findings to the document; triggers verification round. */
+    'audit/apply': AuditApply
     /** Update scenario metadata (ratings, comments, tags, groupings, etc.) */
     'scenario/update': ScenarioUpdate
   }
@@ -215,7 +227,7 @@ export interface AuditApplyRequest {
 
 /** Result of rendering a file from the round's accepted findings. */
 export type AuditApplyResult =
-  | { ok: true }
+  | { ok: true; verificationRound?: number; remainingFindings?: number }
   | { ok: false; error: AuditFailure }
 
 /**

@@ -11,10 +11,10 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ReadFileBytes } from './ReviewPanel.tsx'
 
 /** Wiki index the audit reads its regulation pages from; its links name those pages. */
-const WIKI_INDEX = '.wiki/wiki/_index.md'
+const WIKI_INDEX = '.wiki/_index.md'
 
 /** Directory the wiki index links resolve against. */
-const WIKI_BASE = '.wiki/wiki/'
+const WIKI_BASE = '.wiki/'
 
 /** Trailing citation clause `audit_write` requires of a finding that rests on a regulation. */
 const BASIS_CLAUSE = /依据[：:]\s*([^\n]+)$/m

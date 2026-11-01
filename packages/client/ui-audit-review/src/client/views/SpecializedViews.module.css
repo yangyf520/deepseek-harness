@@ -110,11 +110,15 @@
 
 .decision {
   display: inline-flex;
-  padding: 2px 8px;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 4px 12px;
   border-radius: 999px;
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
+  line-height: 1;
 }
 
 .decisionAccepted {

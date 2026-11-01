@@ -45,6 +45,7 @@ import type {
   AuditExportDataResult,
   AuditTrackRequest,
   AuditTrackResult,
+  PresentationHints,
 } from './types.ts'
 
 import { registerProjection } from './projection.ts'
@@ -507,9 +508,51 @@ function createAuditWriteTool(ctx: Context) {
         ...args.cardTitle !== undefined ? { cardTitle: args.cardTitle } : {},
         ...args.summary !== undefined ? { summary: args.summary } : {},
         ...args.severityLabels !== undefined ? { severityLabels: args.severityLabels } : {},
-        ...args.presentationHints !== undefined ? { presentationHints: args.presentationHints } : {},
+        ...args.presentationHints !== undefined ? { presentationHints: args.presentationHints as PresentationHints } : {},
       })
       return { round: args.round, findingCount: anchor.findings.length }
+    },
+  })
+}
+
+/**
+ * Wiki reference loader tool: reads reference documents from `.wiki/` directory
+ * to use as audit baseline. Supports reading the wiki index and specific topic pages.
+ * @param ctx - Host context carrying the filesystem service.
+ * @returns the registered tool definition.
+ */
+function createWikiReadTool(ctx: Context) {
+  return defineTool({
+    name: 'wiki_read_reference',
+    description: 'Read reference documents from the `.wiki/` directory to use as audit baseline. Reads the wiki index (.wiki/_index.md) or specific topic pages. Use this to load regulations, standards, or criteria before auditing documents against them.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Path to the wiki page to read, relative to workspace root. Use ".wiki/_index.md" for the index, or ".wiki/<topic>.md" for specific pages.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          content: { type: 'string', required: true },
+          exists: { type: 'boolean', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text' as const,
+        text: value.exists ? `Read ${value.content.length} characters from ${_args.path}.` : `Wiki page ${_args.path} does not exist.`,
+      }],
+    },
+    async execute(args, exec) {
+      const session = exec.agent?.session
+      if (session === undefined) throw new Error('wiki_read_reference: no active session')
+      const cwd = session.header.cwd
+      try {
+        const target = await ctx.fs.resolve(args.path, { ...cwd !== undefined ? { cwd } : {} })
+        const content = await ctx.fs.readText(target)
+        return { content, exists: true }
+      } catch {
+        return { content: '', exists: false }
+      }
     },
   })
 }
@@ -561,6 +604,7 @@ export class AuditReviewService extends TypertRemoteService {
     const knownEventTypes = KNOWN_SESSION_EVENT_TYPES as Set<string>
     knownEventTypes.add('audit/write')
     knownEventTypes.add('audit/decide')
+    knownEventTypes.add('audit/apply')
     knownEventTypes.add('scenario/update')
     registerProjection(this.ctx)
     this.ctx.tools.register(createAuditWriteTool(this.ctx))
@@ -568,6 +612,7 @@ export class AuditReviewService extends TypertRemoteService {
     this.ctx.tools.register(createAnalyzeTool(this.ctx))
     this.ctx.tools.register(createGroupTool(this.ctx))
     this.ctx.tools.register(createConfigureTool(this.ctx))
+    this.ctx.tools.register(createWikiReadTool(this.ctx))
     this.ctx.systemPrompt.section({
       name: 'audit-review:guidance',
       order: 100,
@@ -691,6 +736,20 @@ Example for compliance audit:
 ## Output
 After \`audit_write\` succeeds, reply with ONE sentence summarizing the result. Never output findings as text/tables/lists, never explain the analysis process — the review card handles all of this.
 
+## Verification (二次验证)
+After the user accepts findings and applies changes (via the apply remote), the system records a verification round. To verify fixes:
+1. The apply result returns \`verificationRound\` (the next round number)
+2. Re-run the audit on the modified document using that round number
+3. Compare finding counts: fewer findings = fixes confirmed
+4. Report verification result to the user
+
+## Wiki Integration (LLM Wiki)
+Use \`wiki_read_reference\` to load reference documents from \`.wiki/\` directory:
+- Read \`.wiki/_index.md\` first to discover available reference pages
+- Read specific topic pages (e.g. \`.wiki/compliance.md\`) for detailed criteria
+- Use loaded references as the baseline for auditing subject documents
+- Store new reference documents into \`.wiki/\` after converting with \`audit_convert_document\`
+
 ## Important
 - \`audit_write\` rejects the call when a quote is missing or ambiguous
 - Applying a finding replaces its quote in the text file; empty replacement deletes the line`,
@@ -769,6 +828,16 @@ This audit system is a **generic capability platform** — not tied to any speci
 { "layout": "grouped-list", "capabilities": { "grouping": { "enabled": true, "groupBy": "course" }, "scoring": { "enabled": true, "target": "satisfaction", "label": "满意度", "range": [1, 5] }, "tagging": { "enabled": true, "allowedTags": ["优秀", "良好", "待改进"] }, "exporting": { "enabled": true, "formats": ["json", "html"] } } }
 \`\`\`
 
+**Resume matching (find similar):**
+\`\`\`json
+{ "layout": "matrix", "capabilities": { "grouping": { "enabled": true, "groupBy": "skill-category" }, "scoring": { "enabled": true, "target": "match-score", "label": "匹配度", "range": [0, 100] }, "tagging": { "enabled": true, "allowedTags": ["推荐面试", "待定", "不匹配"] }, "exporting": { "enabled": true, "formats": ["csv", "json"] } } }
+\`\`\`
+
+**Document version comparison (find differences):**
+\`\`\`json
+{ "layout": "diff-view", "capabilities": { "comparing": { "enabled": true }, "tagging": { "enabled": true, "allowedTags": ["新增", "删除", "修改"] }, "exporting": { "enabled": true, "formats": ["markdown", "html"] } } }
+\`\`\`
+
 **Key principle: scenarios emerge from capability combinations, not from hardcoded logic.**`,
     })
   }
@@ -785,7 +854,17 @@ This audit system is a **generic capability platform** — not tied to any speci
     if (!round.state.findings.some(f => f.id === request.findingId)) {
       return { ok: false, error: { code: 'finding-not-found', message: `round ${request.round} has no finding '${request.findingId}'` } }
     }
-    round.session.append('audit/decide', { round: request.round, findingId: request.findingId, decision: request.decision })
+    // Extract user info from OAuth identity cookie (set by auth-gate)
+    type AuthPrincipal = { user?: { userId?: string; displayName?: string } }
+    const principal = (globalThis as Record<string, unknown>).__dshAuthPrincipal__ as AuthPrincipal | undefined
+    const user = principal?.user
+    round.session.append('audit/decide', {
+      round: request.round,
+      findingId: request.findingId,
+      decision: request.decision,
+      ...(user?.userId ? { userId: user.userId } : {}),
+      ...(user?.displayName ? { displayName: user.displayName } : {}),
+    })
     return { ok: true }
   }
 
@@ -845,7 +924,14 @@ This audit system is a **generic capability platform** — not tied to any speci
       }
       throw error
     }
-    return { ok: true }
+    // Record that apply succeeded; verification round is ready for re-audit
+    const verificationRound = request.round + 1
+    session.append('audit/apply', {
+      round: request.round,
+      findingId: request.findingId,
+      verificationRound,
+    })
+    return { ok: true, verificationRound }
   }
 
   /**

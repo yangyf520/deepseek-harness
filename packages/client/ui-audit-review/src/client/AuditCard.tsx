@@ -161,20 +161,16 @@ export function AuditOverviewCard({ state, onOpenReview, onDownload, t }: AuditO
           </span>
         )}
       </div>
-      {findings.slice(0, 3).map((finding, i) => {
+      {findings.slice(0, 3).map((finding) => {
         const severity = parseIssue(finding.issue).severity
         return (
           <div key={finding.id} style={{
             display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', cursor: 'pointer',
           }}>
             <span className={css.severityTag} style={{
-              minWidth: '20px', textAlign: 'center',
               background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', padding: '0 6px', fontWeight: 500,
-            }}>{i + 1}</span>
-            <span className={css.severityTag} style={{
-              background: SEVERITY_COLOR[severity], color: 'rgb(255, 255, 255)',
-              display: 'inline-flex', alignItems: 'center', fontSize: '10px', padding: '0 6px',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '10px', padding: '0 6px', height: '18px', minWidth: '18px',
             }}>{t(`severity.${severity}`)}</span>
             <span style={{
               flex: '1 1 0%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
