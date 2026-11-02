@@ -33,6 +33,11 @@ function isAuthError(error: unknown): boolean {
   return false
 }
 
+/** Detect auth error from error text (401 converted to isError result by SDK). */
+function isAuthErrorText(text: string): boolean {
+  return /\b401\b|unauthorized|authentication|token.*expir|access.*denied/i.test(text)
+}
+
 /**
  * Detect MCP session expiry errors (JSON-RPC -32600 with session-shaped message).
  * The gateway recycles session IDs after inactivity; the fix is to reconnect,
@@ -189,10 +194,29 @@ export async function syncTools(
         const activeClient = opts.currentClient?.() ?? client
         let reconnecting = false
         try {
-          return await activeClient.callTool(
+          const result = await activeClient.callTool(
             { name: tool.name, arguments: args },
             { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
           )
+          // Check if the result is an auth error (401 converted to isError by SDK)
+          // and attempt token renewal before returning.
+          if (result && typeof result === 'object' && 'isError' in result && result.isError === true) {
+            const text = extractText(result.content as unknown as JsonValue[], tool.name)
+            // If the error looks like an auth error (401), try to renew token
+            if (opts.renewToken && opts.currentClient && isAuthErrorText(text)) {
+              const renewed = await opts.renewToken()
+              if (renewed) {
+                const freshClient = opts.currentClient()
+                if (freshClient) {
+                  return await freshClient.callTool(
+                    { name: tool.name, arguments: args },
+                    { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+                  )
+                }
+              }
+            }
+          }
+          return result
         } catch (callError) {
           // MCP session expired: reconnect with a fresh session and retry once.
           if (opts.reconnect && opts.currentClient && isSessionError(callError) && !reconnecting) {
