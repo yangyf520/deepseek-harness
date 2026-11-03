@@ -24,6 +24,7 @@ import type { ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepse
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { startEgressCallbackServer, rewriteAuthRedirectUri, type EgressCallbackServer } from './egress-callback.ts'
 
 /** Detect 401 / authentication errors from the MCP SDK. */
 function isAuthError(error: unknown): boolean {
@@ -61,6 +62,8 @@ function isSessionError(error: unknown): boolean {
 export interface EgressAuthFlow {
   /** Authorization URL already opened for this connection. */
   openedUrl?: string
+  /** Active callback server for auto-close functionality. */
+  callbackServer?: EgressCallbackServer
 }
 
 /** Resolved options relevant to tool bridging. */
@@ -404,12 +407,17 @@ function openBrowser(url: string, ctx: Context): void {
  * When the gateway returns an egress authorization prompt, open the browser
  * once per flow and poll by retrying the tool call until the user completes
  * sign-in or we time out. Returns the real tool result on success.
+ *
+ * The authorization URL is rewritten to redirect to a local callback server
+ * that serves a success page with `window.close()`, enabling auto-close of
+ * the browser window after authorization completes.
+ *
  * @param authUrl - egress authorization URL from the gateway error text.
  * @param argsObj - original tool arguments, replayed while polling.
  * @param call - raw upstream call replayed while polling.
  * @param exec - exact ToolRuntime invocation, for cancellation.
  * @param ctx - context carrying the logger.
- * @param flow - per-connection state recording the already-opened URL.
+ * @param flow - per-connection state recording the already-opened URL and callback server.
  * @returns the upstream result once authorization completes.
  * @throws when the invocation is cancelled or authorization does not complete in time.
  */
@@ -421,34 +429,59 @@ async function handleEgressAuth(
   ctx: Context,
   flow: EgressAuthFlow,
 ): Promise<unknown> {
+  // Start callback server if not already running for this connection
+  if (!flow.callbackServer) {
+    try {
+      flow.callbackServer = await startEgressCallbackServer(ctx)
+      ctx.logger.info(`Egress callback server started: ${flow.callbackServer.callbackUrl}`)
+    } catch (error) {
+      ctx.logger.warn(`Failed to start egress callback server: ${String(error)} — browser window will not auto-close`)
+    }
+  }
+
+  // Rewrite auth URL to use our local callback server
+  const browserUrl = flow.callbackServer
+    ? rewriteAuthRedirectUri(authUrl, flow.callbackServer.callbackUrl)
+    : authUrl
+
   if (flow.openedUrl !== authUrl) {
     flow.openedUrl = authUrl
-    ctx.logger.info(`Opening authorization page: ${authUrl}`)
-    openBrowser(authUrl, ctx)
+    ctx.logger.info(`Opening authorization page: ${browserUrl}`)
+    openBrowser(browserUrl, ctx)
   } else {
-    ctx.logger.info(`Authorization page already opened, waiting for user to complete sign-in at: ${authUrl}`)
+    ctx.logger.info(`Authorization page already opened, waiting for user to complete sign-in at: ${browserUrl}`)
   }
 
   // Poll by retrying the tool call. Once the user authorizes in the browser,
   // the gateway will forward the call to the upstream server and return data.
-  const maxAttempts = 24
+  const maxAttempts = 60  // 60 × 5s = 300s (5 minutes)
   const intervalMs = 5_000
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, intervalMs))
-    if (exec.signal?.aborted) {
-      throw new Error('Waiting for authorization was interrupted. The authorization page is still open in your browser — complete the sign-in there, then ask your question again.')
-    }
-    try {
-      const retryResult = await call(argsObj, exec)
-      const retryParsed = specTypeSchemas.CallToolResult['~standard'].validate(retryResult)
-      if (retryParsed.issues === undefined && retryParsed.value.isError !== true) {
-        return retryResult
+  try {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+      if (exec.signal?.aborted) {
+        throw new Error('Waiting for authorization was interrupted. The authorization page is still open in your browser — complete the sign-in there, then ask your question again.')
       }
-    } catch {
-      // Authorization not yet complete; keep polling.
+      try {
+        const retryResult = await call(argsObj, exec)
+        const retryParsed = specTypeSchemas.CallToolResult['~standard'].validate(retryResult)
+        if (retryParsed.issues === undefined && retryParsed.value.isError !== true) {
+          return retryResult
+        }
+      } catch {
+        // Authorization not yet complete; keep polling.
+      }
+    }
+    throw new Error(`Authorization timed out after ${Math.round(maxAttempts * intervalMs / 1000)}s. Please open this URL in your browser to complete authorization: ${authUrl}`)
+  } finally {
+    // Dispose callback server after authorization completes or times out
+    if (flow.callbackServer) {
+      await flow.callbackServer.dispose().catch((err) => {
+        ctx.logger.warn(`Failed to dispose egress callback server: ${String(err)}`)
+      })
+      delete flow.callbackServer
     }
   }
-  throw new Error(`Authorization timed out after ${Math.round(maxAttempts * intervalMs / 1000)}s. Please open this URL in your browser to complete authorization: ${authUrl}`)
 }
 
 /**
